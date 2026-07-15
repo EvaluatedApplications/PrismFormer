@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Prism Studio — the WinForms GUI for PrismFormer. A front-end over PrismGym: live training (per-skill levels +
+       accuracy + log), a chat REPL with the AlgFormer mini-LLM, and the BabyLM challenge tab. The core (PrismFormer)
+       comes transitively through PrismGym. Native to the PrismFormer repo. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PrismStudio</RootNamespace>
+    <AssemblyName>PrismStudio</AssemblyName>
+    <!-- The UI is a hand-coded fixed-pixel layout, so DON'T let per-monitor DPI scaling reflow it (that squashed/overlapped
+         the controls on scaled laptop displays). Render DPI-unaware and let Windows scale the whole window uniformly
+         (GDI-scaled = crisper than a bitmap stretch). Fixes "buttons overlapping" on machines with display scaling != 100%. -->
+    <ApplicationHighDpiMode>DpiUnawareGdiScaled</ApplicationHighDpiMode>
+    <!-- Server GC: per-core heaps + parallel background collection. The training hot path allocates ~1 GB/s of transient
+         double[]; Workstation GC serialized the parallel shards on every collection (measured: CPU 47%→83%, ~1.75x throughput). -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PrismGym\PrismGym.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The training data ships in-source: data/text (corpus), data/pairs, data/gossip. Copied next to the app at
+         build; the app trains straight from here. Fork the repo and edit these folders to change what it learns. -->
+    <Content Include="data\**">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+</Project>

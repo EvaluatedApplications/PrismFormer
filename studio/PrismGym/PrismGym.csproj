@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The Prism-native host: a small gym + REPL over the PrismFormer core library (AlgFormer, the algebraic phasor
+       transformer). Generates skill data, trains AlgFormer, grades by generating, levels up per skill; also hosts the
+       BabyLM challenge (BabyLmRun). Native to the PrismFormer repo. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PrismGym</RootNamespace>
+    <AssemblyName>prismgym</AssemblyName>
+    <!-- Server GC: per-core heaps + parallel background collection. The training hot path allocates ~1 GB/s of transient
+         double[]; Workstation GC serialized the parallel shards on every collection (measured: CPU 47%→83%, ~1.75x throughput). -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\PrismFormer.csproj" />
+    <!-- Reads the official BabyLM Strict-Small corpus (a single Parquet file) for BabyLmRun. -->
+    <PackageReference Include="Parquet.Net" Version="6.0.3" />
+  </ItemGroup>
+</Project>

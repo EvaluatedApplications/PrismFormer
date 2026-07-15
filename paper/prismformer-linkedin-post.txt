@@ -1,0 +1,19 @@
+I designed a self-replicating swarm of tiny AIs. Here is the honest version of what that means.
+
+I am not an ML researcher. I am a full-stack developer with a computer-networking degree. This started from a stubborn question: if you wanted a model to reason instead of recall, what would you actually have to represent?
+
+I began from a few axioms and a picture of a "Platonic space" where concepts sit at fixed addresses and reasoning is navigation, not lookup. Chasing that, I kept landing on the same thing: a codec. A fixed way to write any concept, word or number, as a vector, so that ONE operation composes two of them and you can read the answer straight back out.
+
+The encoding that fell out was phasors: every concept a bundle of unit complex numbers, composed by complex multiplication. Write numbers as phases and something strange happens. Binding two numbers ADDS them on one band and MULTIPLIES them on another. I never taught it to add. The representation just did it: 100/100 single-digit sums and 81/81 products, with zero training.
+
+Then I found out the math was decades old (Plate's Holographic Reduced Representations, Random Fourier Features). I credit all of it. What I actually did was make it the trainable substrate of a transformer, and that is where the networking background earned its keep.
+
+Because the substrate is only ever read during backprop, the gradients from a batch come out bit-for-bit identical whether you compute them on one machine or split them across a hundred. Bit-exactness is a networking property. It means a slow laptop's contribution and a fast server's combine into the exact same bits, so a swarm of mismatched, unreliable CPUs can train ONE coherent model. No GPUs. No parameter server. Every node holds the whole model, like every shard of a hologram still holds the whole image, and a new node joins by receiving the model and, from then on, replicating and spreading it. That is the "self-replicating" part.
+
+Against a parameter-matched transformer, on the same worked, digit-by-digit arithmetic, it generalises to unseen problems (55% add, 70% sub held-out) while the transformer sits near zero. And because every activation is a phasor, you can literally decode what the model is computing at each step, with no trained probe.
+
+I am upfront about the limits: this is at roughly 100k parameters, the full colony is shown to run but not yet proven to converge at scale, and long multiplication needs more work. Every number in the paper comes from a script you can run yourself.
+
+It is called PrismFormer. The paper is open access with a DOI, and the code, benchmarks, and a runnable verification kit are public. Paper and repo links in the first comment.
+
+#MachineLearning #AI #DistributedSystems #NeuralNetworks

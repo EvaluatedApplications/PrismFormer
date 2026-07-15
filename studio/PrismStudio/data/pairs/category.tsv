@@ -1,0 +1,151 @@
+pig belongs to	animal
+pea belongs to	vegetable
+carrot belongs to	vegetable
+lion is a	animal
+pig is a	animal
+pear belongs to	fruit
+cow is a	animal
+onion is a	vegetable
+classify cow	animal
+tiger is a	animal
+the category of corn is	vegetable
+corn belongs to	vegetable
+the category of banana is	fruit
+plum belongs to	fruit
+the category of sheep is	animal
+plum is a	fruit
+classify onion	vegetable
+peach belongs to	fruit
+potato is a	vegetable
+the category of apple is	fruit
+potato belongs to	vegetable
+grape belongs to	fruit
+cherry belongs to	fruit
+lemon is a	fruit
+classify dog	animal
+dog is a	animal
+pear is a	fruit
+classify mango	fruit
+pea is a	vegetable
+lemon belongs to	fruit
+the category of lion is	animal
+horse is a	animal
+cherry is a	fruit
+classify pea	vegetable
+the category of potato is	vegetable
+classify plum	fruit
+classify apple	fruit
+the category of onion is	vegetable
+classify potato	vegetable
+goat belongs to	animal
+corn is a	vegetable
+lion belongs to	animal
+the category of horse is	animal
+peach is a	fruit
+celery belongs to	vegetable
+grape is a	fruit
+cow belongs to	animal
+horse belongs to	animal
+classify lion	animal
+mango is a	fruit
+classify pig	animal
+onion belongs to	vegetable
+the category of peach is	fruit
+banana is a	fruit
+classify lemon	fruit
+cat belongs to	animal
+classify sheep	animal
+sheep is a	animal
+classify grape	fruit
+the category of cherry is	fruit
+the category of dog is	animal
+tiger belongs to	animal
+mango belongs to	fruit
+classify celery	vegetable
+carrot is a	vegetable
+the category of carrot is	vegetable
+classify peach	fruit
+the category of pig is	animal
+the category of pea is	vegetable
+classify cherry	fruit
+the category of mango is	fruit
+classify cat	animal
+classify carrot	vegetable
+the category of plum is	fruit
+sheep belongs to	animal
+the category of goat is	animal
+classify pear	fruit
+the category of cow is	animal
+the category of lemon is	fruit
+the category of grape is	fruit
+classify tiger	animal
+classify goat	animal
+cat is a	animal
+the category of pear is	fruit
+the category of cat is	animal
+the category of eagle is	bird
+classify eagle	bird
+classify bear	animal
+bear is a	animal
+classify robin	bird
+wolf is a	animal
+sparrow is a	bird
+sparrow belongs to	bird
+robin is a	bird
+the category of fox is	animal
+the category of celery is	vegetable
+classify sparrow	bird
+the category of wolf is	animal
+the category of owl is	bird
+robin belongs to	bird
+classify horse	animal
+apple belongs to	fruit
+wolf belongs to	animal
+the category of hawk is	bird
+eagle is a	bird
+classify fox	animal
+fox belongs to	animal
+classify corn	vegetable
+celery is a	vegetable
+the category of tiger is	animal
+owl is a	bird
+classify wolf	animal
+eagle belongs to	bird
+hawk belongs to	bird
+goat is a	animal
+the category of bear is	animal
+hawk is a	bird
+banana belongs to	fruit
+classify owl	bird
+duck is a	bird
+apple is a	fruit
+classify goose	bird
+bear belongs to	animal
+the category of duck is	bird
+crow is a	bird
+goose belongs to	bird
+classify red	color
+classify green	color
+fox is a	animal
+the category of goose is	bird
+owl belongs to	bird
+yellow is a	color
+red belongs to	color
+classify duck	bird
+the category of purple is	color
+the category of sparrow is	bird
+classify yellow	color
+green belongs to	color
+classify hawk	bird
+the category of blue is	color
+crow belongs to	bird
+duck belongs to	bird
+classify crow	bird
+classify purple	color
+the category of yellow is	color
+dog belongs to	animal
+the category of crow is	bird
+the category of robin is	bird
+green is a	color
+the category of green is	color
+blue belongs to	color

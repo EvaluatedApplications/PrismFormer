@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- PrismFormer — the algebraic PHASOR transformer. A transformer shape where every dense map is an algebraic
+       relation-bank of decodable FACE parameters, over a uniform phasor codec (numbers are phasors; one bind rule
+       does symbolic binding AND arithmetic). Pure double[] CPU math — no TorchSharp, no GPU. The one dependency,
+       EvalApp.Consumer, provides the tuned, resource-gated data-parallel training fan-out (falls back to in-box TPL). -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PrismFormer</RootNamespace>
+    <AssemblyName>PrismFormer</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!-- the library is exactly src/ — bench/, studio/, PrismNet/, examples/ are their own projects in this solution and
+         must not leak into the library (scoping the compile items avoids per-folder Compile Remove whack-a-mole). -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src/**/*.cs" />
+    <PackageReference Include="EvalApp.Consumer" Version="1.0.13" />
+    <!-- Relay transport: host + slaves dial OUT to a free public MQTT broker, so it works through any NAT with no
+         port-forward and nothing to install — the "paste a code and it works over the internet" path. -->
+    <PackageReference Include="MQTTnet" Version="4.3.7.1207" />
+  </ItemGroup>
+</Project>

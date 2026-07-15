@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- PrismFormer benchmark: races the phasor transformer against a pound-for-pound (param-matched) dense transformer
+       across a range of tasks, with train vs HELD-OUT splits — the held-out gap is the generalisation demonstration. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PrismFormer.Bench</RootNamespace>
+    <AssemblyName>prismformer-bench</AssemblyName>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PrismFormer.csproj" />
+  </ItemGroup>
+</Project>

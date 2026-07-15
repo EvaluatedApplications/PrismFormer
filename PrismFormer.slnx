@@ -1,0 +1,12 @@
+<Solution>
+  <Project Path="PrismFormer.csproj" />
+  <Project Path="bench/PrismFormer.Bench.csproj" />
+  <Project Path="PrismNet/PrismNet.csproj" />
+  <Folder Name="/studio/">
+    <Project Path="studio/PrismGym/PrismGym.csproj" />
+    <Project Path="studio/PrismStudio/PrismStudio.csproj" />
+  </Folder>
+  <Folder Name="/examples/">
+    <Project Path="examples/DistributedTest/DistributedTest.csproj" />
+  </Folder>
+</Solution>

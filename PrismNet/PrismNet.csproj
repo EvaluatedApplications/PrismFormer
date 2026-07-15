@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Networked, elastic distributed training for PrismFormer: a HOST manages a worker pool and delegates data shards;
+       WORKERS ("slaves") register, contribute serialized gradients, and can join/leave mid-run. The merge is exact
+       (see examples/DistributedTest). Transport is a plain socket; free-public-infra NAT traversal (STUN + public MQTT
+       rendezvous + UDP hole punch) layers on top. Modes: self-test | host | worker | stun. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>prismnet</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PrismFormer.csproj" />
+    <ProjectReference Include="..\studio\PrismGym\PrismGym.csproj" />
+  </ItemGroup>
+</Project>

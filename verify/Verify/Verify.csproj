@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- PrismFormer reproducibility kit: verify the core claims from source in seconds (no training). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PrismFormer.Verify</RootNamespace>
+    <AssemblyName>prism-verify</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\PrismFormer.csproj" />
+  </ItemGroup>
+</Project>

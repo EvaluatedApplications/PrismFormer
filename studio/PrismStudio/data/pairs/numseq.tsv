@@ -1,0 +1,229 @@
+next after 1 4 7 10 is	13
+next after 8 10 12 is	14
+next after 3 6 9 is	12
+next after 2 5 8 is	11
+next after 1 3 5 7 is	9
+next after 6 8 10 12 is	14
+next after 0 2 4 is	6
+next after 6 7 8 9 is	10
+next after 10 11 12 13 is	14
+next after 2 4 6 is	8
+next after 7 10 13 is	16
+next after 5 8 11 is	14
+next after 1 4 7 is	10
+next after 0 2 4 6 is	8
+next after 0 1 2 3 is	4
+next after 3 5 7 is	9
+next after 6 7 8 is	9
+next after 8 9 10 is	11
+next after 5 6 7 is	8
+next after 3 4 5 6 is	7
+next after 6 9 12 is	15
+next after 7 8 9 10 is	11
+next after 4 7 10 13 is	16
+next after 0 3 6 9 is	12
+next after 11 14 17 is	20
+next after 3 4 5 is	6
+next after 10 13 16 19 is	22
+next after 3 5 7 9 is	11
+next after 5 8 11 14 is	17
+next after 1 2 3 is	4
+next after 7 10 13 16 is	19
+next after 10 12 14 16 is	18
+next after 5 6 7 8 is	9
+next after 9 11 13 is	15
+next after 8 9 10 11 is	12
+next after 10 11 12 is	13
+next after 10 12 14 is	16
+next after 10 13 16 is	19
+next after 2 3 4 is	5
+next after 7 8 9 is	10
+next after 1 2 3 4 is	5
+next after 1 3 5 is	7
+next after 5 7 9 11 is	13
+next after 2 4 6 8 is	10
+next after 11 14 17 20 is	23
+next after 9 12 15 is	18
+next after 6 8 10 is	12
+next after 8 10 12 14 is	16
+next after 4 6 8 is	10
+next after 8 11 14 is	17
+next after 9 10 11 is	12
+next after 9 11 13 15 is	17
+next after 2 5 8 11 is	14
+next after 7 9 11 13 is	15
+next after 0 1 2 is	3
+next after 4 7 10 is	13
+next after 11 13 15 17 is	19
+next after 2 3 4 5 is	6
+next after 8 11 14 17 is	20
+next after 11 12 13 14 is	15
+next after 0 3 6 is	9
+next after 7 9 11 is	13
+next after 4 5 6 7 is	8
+next after 5 7 9 is	11
+next after 11 12 13 is	14
+next after 4 6 8 10 is	12
+next after 11 13 15 is	17
+next after 9 12 15 18 is	21
+next after 3 6 9 12 is	15
+next after 6 9 12 15 is	18
+next after 11 13 15 17 19 is	21
+next after 12 14 16 18 20 is	22
+next after 9 12 15 18 21 is	24
+next after 10 14 18 22 26 is	30
+next after 2 6 10 14 is	18
+next after 10 12 14 16 18 is	20
+next after 4 8 12 16 is	20
+next after 2 6 10 14 18 is	22
+next after 5 8 11 14 17 is	20
+next after 14 18 22 26 is	30
+next after 9 11 13 15 17 is	19
+next after 12 15 18 is	21
+next after 12 14 16 18 is	20
+next after 13 17 21 25 is	29
+next after 1 4 7 10 13 is	16
+next after 8 9 10 11 12 is	13
+next after 0 4 8 is	12
+next after 11 15 19 is	23
+next after 13 14 15 16 17 is	18
+next after 13 15 17 is	19
+next after 1 5 9 13 is	17
+next after 7 10 13 16 19 is	22
+next after 3 7 11 15 is	19
+next after 3 5 7 9 11 is	13
+next after 4 5 6 is	7
+next after 11 12 13 14 15 is	16
+next after 9 10 11 12 13 is	14
+next after 8 10 12 14 16 is	18
+next after 2 4 6 8 10 is	12
+next after 12 13 14 15 16 is	17
+next after 12 16 20 24 is	28
+next after 10 11 12 13 14 is	15
+next after 7 11 15 is	19
+next after 10 13 16 19 22 is	25
+next after 0 1 2 3 4 is	5
+next after 13 16 19 22 25 is	28
+next after 13 15 17 19 21 is	23
+next after 12 15 18 21 is	24
+next after 10 14 18 is	22
+next after 6 9 12 15 18 is	21
+next after 14 15 16 17 is	18
+next after 6 10 14 18 is	22
+next after 14 17 20 23 is	26
+next after 12 16 20 24 28 is	32
+next after 14 16 18 is	20
+next after 14 18 22 26 30 is	34
+next after 9 10 11 12 is	13
+next after 13 17 21 25 29 is	33
+next after 0 4 8 12 16 is	20
+next after 8 12 16 20 is	24
+next after 10 14 18 22 is	26
+next after 14 15 16 is	17
+next after 13 17 21 is	25
+next after 6 8 10 12 14 is	16
+next after 3 4 5 6 7 is	8
+next after 3 7 11 15 19 is	23
+next after 5 6 7 8 9 is	10
+next after 12 14 16 is	18
+next after 7 11 15 19 23 is	27
+next after 13 14 15 is	16
+next after 13 16 19 is	22
+next after 2 6 10 is	14
+next after 5 7 9 11 13 is	15
+next after 0 3 6 9 12 is	15
+next after 0 2 4 6 8 is	10
+next after 11 15 19 23 27 is	31
+next after 12 15 18 21 24 is	27
+next after 7 9 11 13 15 is	17
+next after 3 7 11 is	15
+next after 9 13 17 is	21
+next after 1 2 3 4 5 is	6
+next after 12 17 22 is	27
+next after 2 7 12 is	17
+next after 13 17 21 25 29 33 is	37
+next after 12 13 14 15 16 17 is	18
+next after 10 13 16 19 22 25 is	28
+next after 7 11 15 19 is	23
+next after 17 18 19 20 is	21
+next after 3 6 9 12 15 18 is	21
+next after 0 5 10 15 is	20
+next after 17 22 27 32 37 is	42
+next after 17 21 25 29 33 is	37
+next after 3 6 9 12 15 is	18
+next after 14 16 18 20 22 24 is	26
+next after 15 18 21 24 is	27
+next after 6 11 16 21 26 31 is	36
+next after 2 6 10 14 18 22 is	26
+next after 8 13 18 23 28 33 is	38
+next after 9 14 19 24 29 is	34
+next after 10 15 20 25 30 35 is	40
+next after 1 3 5 7 9 11 is	13
+next after 1 6 11 16 21 is	26
+next after 16 17 18 19 is	20
+next after 17 22 27 32 is	37
+next after 3 8 13 18 is	23
+next after 8 10 12 14 16 18 is	20
+next after 17 21 25 29 is	33
+next after 10 15 20 is	25
+next after 16 19 22 25 28 is	31
+next after 16 17 18 is	19
+next after 11 14 17 20 23 is	26
+next after 7 12 17 22 27 32 is	37
+next after 2 7 12 17 22 is	27
+next after 15 16 17 is	18
+next after 14 19 24 29 34 39 is	44
+next after 12 13 14 is	15
+next after 14 18 22 is	26
+next after 1 5 9 13 17 21 is	25
+next after 17 20 23 26 29 is	32
+next after 14 16 18 20 22 is	24
+next after 3 8 13 18 23 is	28
+next after 17 20 23 is	26
+next after 15 18 21 24 27 is	30
+next after 5 10 15 is	20
+next after 8 12 16 is	20
+next after 13 18 23 is	28
+next after 6 7 8 9 10 is	11
+next after 12 15 18 21 24 27 is	30
+next after 4 5 6 7 8 is	9
+next after 7 12 17 22 27 is	32
+next after 16 21 26 31 36 41 is	46
+next after 3 5 7 9 11 13 is	15
+next after 11 16 21 26 31 36 is	41
+next after 4 7 10 13 16 19 is	22
+next after 15 16 17 18 is	19
+next after 6 8 10 12 14 16 is	18
+next after 15 17 19 21 23 is	25
+next after 4 9 14 19 24 is	29
+next after 13 15 17 19 is	21
+next after 13 18 23 28 33 38 is	43
+next after 2 3 4 5 6 7 is	8
+next after 17 19 21 is	23
+next after 17 19 21 23 25 27 is	29
+next after 15 19 23 27 is	31
+next after 0 4 8 12 16 20 is	24
+next after 12 17 22 27 is	32
+next after 9 12 15 18 21 24 is	27
+next after 15 18 21 is	24
+next after 8 11 14 17 20 23 is	26
+next after 2 3 4 5 6 is	7
+next after 14 15 16 17 18 is	19
+next after 13 14 15 16 17 18 is	19
+next after 11 13 15 17 19 21 is	23
+next after 7 8 9 10 11 is	12
+next after 7 10 13 16 19 22 is	25
+next after 9 13 17 21 25 29 is	33
+next after 8 9 10 11 12 13 is	14
+next after 7 12 17 is	22
+next after 5 9 13 17 21 is	25
+next after 16 20 24 28 is	32
+next after 11 16 21 26 31 is	36
+next after 14 17 20 23 26 is	29
+next after 12 14 16 18 20 22 is	24
+next after 16 21 26 31 36 is	41
+next after 6 11 16 21 26 is	31
+next after 12 16 20 24 28 32 is	36
+next after 6 11 16 21 is	26
+next after 1 6 11 16 21 26 is	31
+next after 16 18 20 22 24 26 is	28
