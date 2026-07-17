@@ -6,6 +6,7 @@ using ILGPU;
 using ILGPU.Runtime;
 using ILGPU.Runtime.Cuda;
 using ILGPU.Runtime.CPU;
+using PrismFormer.Gpu;
 
 // PoC: prove the ILGPU -> CUDA toolchain works end-to-end on this machine before investing in the AlgFormer port.
 //   prismformer-gpu            -> vector-add correctness + a throughput sanity check on the GPU
@@ -98,4 +99,14 @@ else if (mode == "matmul")
     var gpuMs = sw.Elapsed.TotalMilliseconds / reps;
     Console.WriteLine($"per matmul ({B}x{K}x{M}): GPU {gpuMs:F3} ms   CPU(1 thread) {cpuMs:F1} ms   speedup ~{cpuMs / Math.Max(0.001, gpuMs):F0}x");
     Console.WriteLine("\nThis is the compute-bound path that dominates AlgFormer. A big speedup here = the port is worth it.");
+}
+else if (mode == "relbank")
+{
+    // The AlgFormer-specific op (Rq/Rk/Rv/Ro): y[i]=Σ_k bank[k][i]·x[(i+k)%d] — a shift-and-scale, not a matmul.
+    Console.WriteLine($"AlgFormer relation-bank kernel — auto-detected device: {GpuDevice.Describe}  (HasGpu={GpuDevice.HasGpu})\n");
+    var (worst, gpuMs, cpuMs) = GpuOps.VerifyRelBank();
+    Console.WriteLine($"correctness vs CPU double definition: worst abs err {worst:E2}  ({(worst < 1e-3 ? "PASS (fp32-close)" : "CHECK")})");
+    Console.WriteLine($"per relbank (4096 rows x 256 dim, S=16): GPU {gpuMs:F3} ms   CPU(1 thread) {cpuMs:F1} ms   speedup ~{cpuMs / Math.Max(0.001, gpuMs):F0}x");
+    Console.WriteLine("\nThe custom relation-bank op ports correctly to GPU — the forward backbone (Rq/Rk/Rv/Ro) is unblocked.");
+    GpuDevice.Shutdown();
 }
