@@ -48,6 +48,28 @@ if (mode == "bench")
 if (mode == "ask")
     return HeadlessNode.Ask(args.Length > 1 ? args[1] : "", args.Length > 2 ? string.Join(' ', args[2..]) : "");
 
+// PROBE: load a SPECIFIC .bin (e.g. the anchor's model pulled down from the box) and serve prompts, to see what it
+// actually produces — does an average-only anchor still emit a structured scratchpad on long arithmetic, even if wrong?
+//   prismgym probe <binPath> [prompt…]     (default prompts = a few long-add questions; default path = prism-anchor.bin)
+if (mode == "probe")
+{
+    var path = args.Length > 1 ? args[1] : Path.Combine(saveDir, "prism-anchor.bin");
+    var pm = new StudioModel(Path.Combine(Path.GetTempPath(), "prismprobe"));
+    if (!pm.Load(path)) { Console.WriteLine($"could not load {path}"); return 1; }
+    Console.WriteLine($"loaded {path} — {pm.ParamCount:N0} params\n");
+    var prompts = args.Length > 2
+        ? new[] { string.Join(' ', args[2..]) }
+        : new[] { "what is 47 + 38", "add 156 and 279", "23 + 19 + 44 =", "what is 128 + 384", "134 + 267 =" };
+    foreach (var q in prompts)
+    {
+        var r = pm.Serve("user: " + q);
+        Console.WriteLine($"── user: {q}");
+        Console.WriteLine($"prism: {r.Continuation}");
+        Console.WriteLine($"   (confidence {r.Conf:F2})\n");
+    }
+    return 0;
+}
+
 var cycles = args.Length > 1 && int.TryParse(args[1], out var c) ? c : (mode == "run" ? 12 : 30);
 
 var gym = new Gym(vocab: 4096, seed: 1);
