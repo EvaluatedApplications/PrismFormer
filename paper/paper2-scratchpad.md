@@ -196,6 +196,17 @@ reachable edge. Follow-ups: (a) deeper/wider cipher (diffusion in more rounds) t
 transformer baseline to test if the relational substrate reaches FURTHER; (c) keyed variant → Gohr-style reduced-round
 key-recovery (academic margin research only).
 
+**§10 addendum — real Speck32/64 vs Gohr (`--speck`, built + test-vector-verified, run PENDING).** Moved from the toy
+cipher to Gohr's actual benchmark: real Speck32/64 (verified against the official test vector 1918.../6574... →
+a868 42f2), input difference 0x0040/0x0000, distinguisher accuracy at R5-8 vs Gohr's R5 92.9 / R6 78.8 / R7 61.6 /
+R8 51.4. Model param-MATCHED (~156k ≈ Gohr's ~100k), trained via the built-in data-parallel `AlgFormer.TrainEpoch`
+(16-core, exact-merge) on ~10^7 views/round (2M samples x 5 epochs). COMPUTE REALITY (measured this session):
+AlgFormer is pure CPU double-math — **NO GPU/CUDA backend exists** (grep-confirmed; the old "--gpu" was EvalApp's own
+tuning fan-out, not AlgFormer). Exact-merge bit-exactness is a SWARM (multi-node reproducibility) property, irrelevant
+to single-node speed. So a fair 10^7 run is a ~5-7h CPU job (no shortcut) — kicked off by the user, not interactively.
+Result TBD. If it lands competitive at R6/R7 with a general-purpose relational model, that's the notable outcome;
+beating a tuned GPU ResNet on try one is a long shot. Full/deployed crypto untouched; distinguisher not key-recovery.
+
 ## Prior art to cite (honest lineage — don't skip these)
 - **Model soups** — Wortsman et al. 2022 (averaging fine-tuned weights; works because of shared init).
 - **Federated Averaging (FedAvg)** — McMahan et al. 2017 (average weights of models on different data).

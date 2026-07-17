@@ -47,6 +47,7 @@ if (args.Contains("--average")) { XferBench.Run(); return; }   // can you averag
 if (args.Contains("--codec-baseline")) { BaselineControlBench.Run(); return; }   // paper1 §6-A control: seed the transformer baseline from the same codec — is the gap init or architecture?
 if (args.Contains("--prototype")) { PrototypeBench.Run(); return; }   // free prototype learning: bundle K holographic image encodings per class into a concept, few-shot curve, no training
 if (args.Contains("--distinguish")) { CryptoDistinguisherBench.Run(); return; }   // reduced-round neural distinguisher (Gohr-style): PrismFormer's reach at telling round-reduced output from random
+if (args.Contains("--speck")) { SpeckDistinguisherBench.Run(); return; }   // PrismFormer vs Gohr's real Speck32/64 benchmark: distinguisher accuracy at 5-8 rounds
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
