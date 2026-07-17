@@ -36,6 +36,8 @@ if (args.Contains("--hash")) { HashBench.Run(); return; }   // hash learnability
 if (args.Contains("--assoc")) { AssocBench.Run(); return; }   // disorder-codec associative memory: reverse hash-lookup of STORED pairs (a rainbow table), capacity-limited, 0% unseen
 if (args.Contains("--crack")) { HashCrackBench.Run(); return; }   // train to invert small permutation hashes; measure held-out LOSS vs chance (how close it gets)
 if (args.Contains("--crack-faces")) { CodecCrackBench.Run(); return; }   // sweep structured/disordered x frozen/unfrozen codec on hash inversion; held-out loss vs chance
+if (args.Contains("--lesion")) { LesionBench.Run(); return; }   // Levin-inspired basal competency: lesion tolerance (graceful degradation) + regeneration (heal after damage)
+if (args.Contains("--colony")) { ColonyBench.Run(); return; }   // Levin-inspired COLLECTIVE competency: a federated colony reaches the goal despite nodes failing every round (broken-hardware analog)
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
