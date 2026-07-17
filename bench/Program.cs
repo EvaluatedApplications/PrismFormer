@@ -38,6 +38,9 @@ if (args.Contains("--crack")) { HashCrackBench.Run(); return; }   // train to in
 if (args.Contains("--crack-faces")) { CodecCrackBench.Run(); return; }   // sweep structured/disordered x frozen/unfrozen codec on hash inversion; held-out loss vs chance
 if (args.Contains("--lesion")) { LesionBench.Run(); return; }   // Levin-inspired basal competency: lesion tolerance (graceful degradation) + regeneration (heal after damage)
 if (args.Contains("--colony")) { ColonyBench.Run(); return; }   // Levin-inspired COLLECTIVE competency: a federated colony reaches the goal despite nodes failing every round (broken-hardware analog)
+if (args.Contains("--diverse")) { DiverseBench.Run(); return; }   // Levin-inspired heterogeneous collective: diverse-config ensemble vs homogeneous (multiple algorithms grouped)
+if (args.Contains("--plasticity")) { PlasticityBench.Run(); return; }   // Levin-inspired plasticity/degeneracy: amputate the critical region, hold it dead, see if the function relocates
+if (args.Contains("--emergence")) { EmergenceBench.Run(); return; }   // Levin-inspired EMERGENCE: the collective learns the addition rule (solves pairs no node ever saw) — competency in the group, in no member
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
