@@ -44,6 +44,8 @@ if (args.Contains("--emergence")) { EmergenceBench.Run(); return; }   // Levin-i
 if (args.Contains("--mesh")) { MeshBench.Run(); return; }   // FAITHFUL Prism Studio mesh: autonomous models chatter via weight-slice elastic-averaging + pair-gossip (NO gradient summing)
 if (args.Contains("--collapse")) { CollapseBench.Run(); return; }   // does the bleed damage holographic info? frozen vs unfrozen codec, algebra accuracy per tick — tests if the codec-pinning prevents collapse
 if (args.Contains("--average")) { XferBench.Run(); return; }   // can you average SEPARATELY-trained models? same/diff init x frozen/no codec — does the codec let genuinely-independent models average?
+if (args.Contains("--codec-baseline")) { BaselineControlBench.Run(); return; }   // paper1 §6-A control: seed the transformer baseline from the same codec — is the gap init or architecture?
+if (args.Contains("--prototype")) { PrototypeBench.Run(); return; }   // free prototype learning: bundle K holographic image encodings per class into a concept, few-shot curve, no training
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
