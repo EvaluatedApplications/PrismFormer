@@ -126,7 +126,7 @@ public sealed class StudioModel
         // WARMUP: the first batch is TINY so feedback lands in seconds, then it doubles up to fill every core.
         var lr = 1.5e-3 * Math.Min(1.0, 4.0 / PrismSpec.Layers);
         var rng = new Random();
-        var maxBatch = Math.Max(64, Environment.ProcessorCount);
+        var maxBatch = gpu != null ? 512 : Math.Max(64, Environment.ProcessorCount);   // GPU wants big batches (amortises the per-batch param-sync); CPU stays at ~cores
         var warm = 4;
         var epochSecs = Math.Max(5.0, minutesPerEpoch * 60.0);   // an "epoch" = ~minutesPerEpoch of random draws — the corpus is far too big for a full pass
         var sw = Stopwatch.StartNew(); long stepTotal = 0; double lastSnap = 0, lastSample = 0, loss = 0; var first = true; var sampleTick = 0; var genBusy = false;
