@@ -6,22 +6,22 @@ using PrismFormer;
 namespace PrismFormer.Gpu;
 
 /// <summary>
-/// Drop-in GPU-accelerated batch trainer with a CPU/GPU LENGTH SPLIT. Short sequences (≤ 90% of the context window)
-/// run on the GPU (length-bucketed so a lone long window never pads the shorts); the longest ~10% (near-full-context
-/// windows that OOM the card and waste the most on padding) run on the CPU in PARALLEL — so both the GPU and all cores
-/// are busy at once. Their
+/// Drop-in GPU-accelerated batch trainer. FULL-GPU: every sequence runs on the GPU (length-bucketed under a token
+/// budget so a lone long window never pads the shorts and each sub-batch fits the card). The CPU/GPU length split is
+/// retained (sequences longer than _gpuMaxLen go to a parallel CPU half) but _gpuMaxLen = MaxContext here, so the CPU
+/// half is normally empty — it only catches anything that somehow exceeds the context window. Their
 /// gradients sum to the identical full-batch gradient; one CPU Adam step at the end. The CPU model stays the source of
 /// truth (serving/bleeding/saving read it). fp32 on the GPU half → float-close to the CPU double path.
 /// </summary>
 public sealed class GpuTrainer : IDisposable
 {
-    const int TokenBudget = 32768;  // padded token-positions per GPU sub-batch (bounds memory + padding waste)
-    readonly int _gpuMaxLen;        // sequences longer than this go to the CPU: the longest ~10% of the context window
+    const int TokenBudget = 24576;  // padded token-positions per GPU sub-batch (bounds memory: keeps full-1024 buckets under ~4GB)
+    readonly int _gpuMaxLen;        // sequences longer than this go to the CPU. FULL-GPU: = MaxContext, so nothing does.
 
     readonly AlgFormer _cpu;
     readonly GpuModel _gpu;
 
-    public GpuTrainer(AlgFormer cpu) { _cpu = cpu; _gpu = new GpuModel(cpu.Serialize()); _gpuMaxLen = Math.Max(1, (int)(0.9 * _gpu.MaxContext)); }
+    public GpuTrainer(AlgFormer cpu) { _cpu = cpu; _gpu = new GpuModel(cpu.Serialize()); _gpuMaxLen = _gpu.MaxContext; }
 
     static byte[] GradBytes(float[] g) { using var ms = new MemoryStream(); var w = new BinaryWriter(ms); foreach (var x in g) w.Write((double)x); w.Flush(); return ms.ToArray(); }
 
