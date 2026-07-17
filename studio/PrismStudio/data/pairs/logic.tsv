@@ -1,0 +1,20 @@
+Tom is taller than Sam, Sam is taller than Jo, who is tallest	Tom > Sam and Sam > Jo, so Tom is tallest
+Ann is older than Ben, Ben is older than Cal, who is oldest	Ann > Ben > Cal, so Ann is oldest
+a is bigger than b, b is bigger than c, is a bigger than c	yes, a > b > c so a > c
+5 is more than 3, 3 is more than 1, is 5 more than 1	yes, 5 > 3 > 1 so 5 > 1
+the cat is faster than the dog, the dog is faster than the snail, who is slowest	cat > dog > snail, so the snail is slowest
+x is less than y, y is less than z, is x less than z	yes, x < y < z so x < z
+Mia is shorter than Leo, Leo is shorter than Ada, who is tallest	Mia < Leo < Ada, so Ada is tallest
+10 is more than 6, 6 is more than 2, which is smallest	10 > 6 > 2, so 2 is smallest
+the truck is heavier than the car, the car is heavier than the bike, what is lightest	truck > car > bike, so the bike is lightest
+Ed runs faster than Ana, Ana runs faster than Sy, who is fastest	Ed > Ana > Sy, so Ed is fastest
+the ball is red or blue, it is not red, what colour is it	not red, so by elimination it is blue
+the door is open or shut, it is not open, so it is	not open, so it is shut
+if it rains the ground is wet, it is raining, so	the rule fires, so the ground is wet
+if the light is on you can see, the light is on, so	the rule fires, so you can see
+all cats are animals, Felix is a cat, is Felix an animal	Felix is a cat and all cats are animals, so yes
+all birds have feathers, a robin is a bird, does a robin have feathers	a robin is a bird and all birds have feathers, so yes
+the number is even or odd, it is not even, so it is	not even, so it is odd
+if you study you pass, you studied, so	the rule fires, so you pass
+the pet is a dog or a cat, it is not a cat, so it is a	not a cat, so it is a dog
+all squares have four sides, this is a square, how many sides	a square has four sides, so four

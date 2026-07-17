@@ -1,0 +1,12 @@
+2 + 3 x 4	multiply first, 3 x 4 = 12, then 2 + 12 = 14, = 14
+10 - 2 x 3	multiply first, 2 x 3 = 6, then 10 - 6 = 4, = 4
+5 x 2 + 1	multiply first, 5 x 2 = 10, then 10 + 1 = 11, = 11
+1 + 2 x 5	multiply first, 2 x 5 = 10, then 1 + 10 = 11, = 11
+6 + 6 / 2	divide first, 6 / 2 = 3, then 6 + 3 = 9, = 9
+4 x 3 - 2	multiply first, 4 x 3 = 12, then 12 - 2 = 10, = 10
+8 / 2 + 3	divide first, 8 / 2 = 4, then 4 + 3 = 7, = 7
+9 - 1 x 4	multiply first, 1 x 4 = 4, then 9 - 4 = 5, = 5
+3 + 4 x 2	multiply first, 4 x 2 = 8, then 3 + 8 = 11, = 11
+7 + 2 x 3	multiply first, 2 x 3 = 6, then 7 + 6 = 13, = 13
+2 x 2 x 2	left to right, 2 x 2 = 4, then 4 x 2 = 8, = 8
+10 / 5 x 2	left to right, 10 / 5 = 2, then 2 x 2 = 4, = 4
