@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- PrismFormerGpu: an experimental GPU compute backend (ILGPU -> CUDA on the NVIDIA driver). The CPU AlgFormer
+       stays the correctness oracle; every kernel is gradchecked against it. fp32 on-GPU (the A3000 is fp32-fast,
+       fp64-slow), so GPU results are float-close to the CPU double path, not bit-identical. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PrismFormer.Gpu</RootNamespace>
+    <AssemblyName>prismformer-gpu</AssemblyName>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ILGPU" Version="1.5.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\PrismFormer.csproj" />
+  </ItemGroup>
+</Project>
