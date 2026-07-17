@@ -22,8 +22,8 @@ public sealed partial class GpuModel
     Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int> _softmaxBack = null!;
     Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, float> _dqAtt = null!, _dkAtt = null!;
     Action<Index1D, ArrayView<float>, ArrayView<float>, int, int> _logitsDC = null!;
-    Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int> _logitsDEmb = null!;
-    Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int> _logitsDh = null!;
+    Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int, int, int> _logitsDEmb = null!;
+    Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int, int, int> _logitsDh = null!;
     Action<Index1D, ArrayView<float>, ArrayView<float>, int, int, int> _embDPos = null!;
     Action<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, int, int> _embScatter = null!;
 
@@ -49,10 +49,10 @@ public sealed partial class GpuModel
             (idx, ds, q, dk, T, d, inv) => { int i = idx % d, j = (idx / d) % T, b = idx / (T * d); float acc = 0f; for (var t = j; t < T; t++) acc += ds[(b * T + t) * T + j] * inv * q[(b * T + t) * d + i]; dk[idx] = acc; });
         _logitsDC = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, int, int>(
             (idx, dlog, gC, B, V) => { float a = 0f; for (var b = 0; b < B; b++) a += dlog[b * V + idx]; gC[idx] = a; });
-        _logitsDEmb = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int>(
-            (idx, dlog, h, gEmb, B, V, d, T) => { int i = idx % d, w = idx / d; float a = 0f; for (var b = 0; b < B; b++) a += dlog[b * V + w] * h[(b * T + (T - 1)) * d + i]; gEmb[idx] = a; });
-        _logitsDh = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int, int>(
-            (idx, dlog, emb, dh, B, V, d, T) => { int i = idx % d, b = idx / d; float a = 0f; for (var w = 0; w < V; w++) a += dlog[b * V + w] * emb[w * d + i]; dh[(b * T + (T - 1)) * d + i] = a; });
+        _logitsDEmb = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int, int, int>(
+            (idx, dlog, h, gEmb, lens, B, V, d, T) => { int i = idx % d, w = idx / d; float a = 0f; for (var b = 0; b < B; b++) a += dlog[b * V + w] * h[(b * T + (lens[b] - 1)) * d + i]; gEmb[idx] = a; });
+        _logitsDh = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, int, int, int, int>(
+            (idx, dlog, emb, dh, lens, B, V, d, T) => { int i = idx % d, b = idx / d; float a = 0f; for (var w = 0; w < V; w++) a += dlog[b * V + w] * emb[w * d + i]; dh[(b * T + (lens[b] - 1)) * d + i] = a; });
         _embDPos = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, int, int, int>(
             (idx, dh, gPos, B, T, d) => { int i = idx % d, t = idx / d; float a = 0f; for (var b = 0; b < B; b++) a += dh[(b * T + t) * d + i]; gPos[idx] = a; });
         _embScatter = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<int>, ArrayView<float>, int, int>(
@@ -63,10 +63,13 @@ public sealed partial class GpuModel
     /// (Emb, Pos, C, then per layer Rq,Rk,Rv,Ro,A1,Ag,Ao) — same layout as AlgFormer.SerializeGradient.</summary>
     public float[] Backward(int[][] tokens, int[] targets)
     {
-        int B = tokens.Length, T = tokens[0].Length, d = _d, N = B * T * d, A = B * T * T;
-        var flat = new int[B * T];
-        for (var b = 0; b < B; b++) for (var t = 0; t < T; t++) flat[b * T + t] = tokens[b][t];
+        int B = tokens.Length, d = _d, T = 0;
+        for (var b = 0; b < B; b++) if (tokens[b].Length > T) T = tokens[b].Length;   // right-pad to batch max
+        int N = B * T * d, A = B * T * T;
+        var flat = new int[B * T]; var lens = new int[B];
+        for (var b = 0; b < B; b++) { lens[b] = tokens[b].Length; for (var t = 0; t < lens[b]; t++) flat[b * T + t] = tokens[b][t]; }
         using var dtok = _acc.Allocate1D(flat);
+        using var dlens = _acc.Allocate1D(lens);
         var bufs = new List<MemoryBuffer1D<float, Stride1D.Dense>>();
         MemoryBuffer1D<float, Stride1D.Dense> Buf(int n) { var b = _acc.Allocate1D<float>(n); bufs.Add(b); return b; }
         ArrayView<float> Bank(int l, int b) => _banks[l].View.SubView(b * _s * d, _s * d);
@@ -103,7 +106,7 @@ public sealed partial class GpuModel
 
         // ── logits backward ──
         using var dlogB = _acc.Allocate1D<float>(B * _v);
-        _logits(B * _v, _emb.View, _cbias.View, Xs[_layers].View, dlogB.View, d, _v, T);
+        _logits(B * _v, _emb.View, _cbias.View, Xs[_layers].View, dlens.View, dlogB.View, d, _v, T);
         _acc.Synchronize();
         var lg = dlogB.GetAsArray1D();
         var dlog = new float[B * _v];
@@ -115,9 +118,9 @@ public sealed partial class GpuModel
         }
         using var ddlog = _acc.Allocate1D(dlog);
         _logitsDC(_v, ddlog.View, gC.View, B, _v);
-        _logitsDEmb(_v * d, ddlog.View, Xs[_layers].View, gEmb.View, B, _v, d, T);
+        _logitsDEmb(_v * d, ddlog.View, Xs[_layers].View, gEmb.View, dlens.View, B, _v, d, T);
         var dh = Buf(N); dh.MemSetToZero();
-        _logitsDh(B * d, ddlog.View, _emb.View, dh.View, B, _v, d, T);   // writes dh at the last position of each row-group; others stay 0
+        _logitsDh(B * d, ddlog.View, _emb.View, dh.View, dlens.View, B, _v, d, T);   // writes dh at each example's REAL last position; others stay 0
         _acc.Synchronize();
 
         // ── per-layer backward ──

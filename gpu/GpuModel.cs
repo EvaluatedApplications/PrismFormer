@@ -29,7 +29,7 @@ public sealed partial class GpuModel : IDisposable
     readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int> _context;
     readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>> _add;
     readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>> _glu;
-    readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int> _logits;
+    readonly Action<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, int, int, int> _logits;
 
     public GpuModel(byte[] serialized)
     {
@@ -55,19 +55,22 @@ public sealed partial class GpuModel : IDisposable
             (idx, a, v, ctx, T, d) => { int i = idx % d, t = (idx / d) % T, b = idx / (T * d); float acc = 0f; for (var j = 0; j <= t; j++) acc += a[(b * T + t) * T + j] * v[(b * T + j) * d + i]; ctx[idx] = acc; });
         _add = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>((idx, x, y, o) => o[idx] = x[idx] + y[idx]);
         _glu = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>((idx, aval, gt, z) => z[idx] = aval[idx] * (1f / (1f + XMath.Exp(-gt[idx]))));
-        _logits = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
-            (idx, emb, cbias, h, outp, d, V, T) => { int w = idx % V, b = idx / V; var row = b * T + (T - 1); float a = cbias[w]; for (var i = 0; i < d; i++) a += emb[w * d + i] * h[row * d + i]; outp[idx] = a; });
+        _logits = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<int>, ArrayView<float>, int, int, int>(
+            (idx, emb, cbias, h, lens, outp, d, V, T) => { int w = idx % V, b = idx / V; var row = b * T + (lens[b] - 1); float a = cbias[w]; for (var i = 0; i < d; i++) a += emb[w * d + i] * h[row * d + i]; outp[idx] = a; });
         InitBackward();
     }
 
     /// <summary>Forward a batch of B sequences, each exactly T tokens (T ≤ maxContext). Returns logits[B][V] at the last position.</summary>
     public float[][] Forward(int[][] tokens)
     {
-        int B = tokens.Length, T = tokens[0].Length, d = _d, N = B * T * d;
-        var flat = new int[B * T];
-        for (var b = 0; b < B; b++) for (var t = 0; t < T; t++) flat[b * T + t] = tokens[b][t];
+        int B = tokens.Length, d = _d, T = 0;
+        for (var b = 0; b < B; b++) if (tokens[b].Length > T) T = tokens[b].Length;   // right-pad to the batch max (causal → padding is inert)
+        var N = B * T * d;
+        var flat = new int[B * T]; var lens = new int[B];
+        for (var b = 0; b < B; b++) { lens[b] = tokens[b].Length; for (var t = 0; t < lens[b]; t++) flat[b * T + t] = tokens[b][t]; }
 
         using var dtok = _acc.Allocate1D(flat);
+        using var dlens = _acc.Allocate1D(lens);
         MemoryBuffer1D<float, Stride1D.Dense> Buf() => _acc.Allocate1D<float>(N);
         var h = Buf(); var q = Buf(); var k = Buf(); var v = Buf(); var ctx = Buf(); var o = Buf(); var m = Buf(); var aval = Buf(); var gt = Buf(); var z = Buf(); var y = Buf();
         using var sc = _acc.Allocate1D<float>(B * T * T);
@@ -96,7 +99,7 @@ public sealed partial class GpuModel : IDisposable
         _acc.Synchronize();
 
         using var dlog = _acc.Allocate1D<float>(B * _v);
-        _logits(B * _v, _emb.View, _cbias.View, h.View, dlog.View, d, _v, T);   // reads the last position of each row-group: row = b*T + (T-1)
+        _logits(B * _v, _emb.View, _cbias.View, h.View, dlens.View, dlog.View, d, _v, T);   // reads each example's REAL last position: row = b*T + (lens[b]-1)
         _acc.Synchronize();
         var lg = dlog.GetAsArray1D();
 

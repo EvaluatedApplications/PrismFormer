@@ -163,7 +163,7 @@ else if (mode == "backward")
     using var gm = new GpuModel(cpu.Serialize());
     var rng = new Random(9);
     var toks = new int[B][]; var tgt = new int[B];
-    for (var b = 0; b < B; b++) { toks[b] = new int[T]; for (var t = 0; t < T; t++) toks[b][t] = rng.Next(V); tgt[b] = rng.Next(V); }
+    for (var b = 0; b < B; b++) { var len = 3 + rng.Next(T - 2); toks[b] = new int[len]; for (var t = 0; t < len; t++) toks[b][t] = rng.Next(V); tgt[b] = rng.Next(V); }   // VARIABLE length → tests ragged right-pad
 
     var g = cpu.NewGrads();
     for (var b = 0; b < B; b++) cpu.Accumulate(toks[b], tgt[b], g);
