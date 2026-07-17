@@ -187,3 +187,36 @@ else if (mode == "backward")
                               : "\n  MISMATCH — a grad section is off (see per-section above).");
     GpuDevice.Shutdown();
 }
+else if (mode == "train")
+{
+    // End-to-end GPU training (hybrid: GPU forward+backward, CPU Adam via AlgFormer.Step, params re-synced each batch).
+    Console.WriteLine($"GPU training demo — device: {GpuDevice.Describe}   (task: predict token[0] = copy-first)\n");
+    const int V = 32, d = 256, S = 8, L = 2, T = 9, B = 512, Batches = 300;
+    var cpu = new AlgFormer(V, shifts: S, layers: L, maxContext: T, dModel: d, frozenPrefix: 0, embedSeed: null, seed: 21);
+    using var gpu = new GpuModel(cpu.Serialize());
+    var rng = new Random(4);
+    (int[][] tk, int[] tg) Make(int b) { var tk = new int[b][]; var tg = new int[b]; for (var i = 0; i < b; i++) { tk[i] = new int[T]; for (var t = 0; t < T; t++) tk[i][t] = rng.Next(V); tg[i] = tk[i][0]; } return (tk, tg); }
+    byte[] GradBytes(float[] g) { using var ms = new MemoryStream(); var w = new BinaryWriter(ms); foreach (var x in g) w.Write((double)x); w.Flush(); return ms.ToArray(); }
+    double Acc() { var (tk, tg) = Make(512); var lg = gpu.Forward(tk); var ok = 0; for (var i = 0; i < tk.Length; i++) { var a = 0; for (var w = 1; w < V; w++) if (lg[i][w] > lg[i][a]) a = w; if (a == tg[i]) ok++; } return (double)ok / tk.Length; }
+
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    for (var it = 1; it <= Batches; it++)
+    {
+        var lr = 3e-3 * (1.0 - 0.9 * (it - 1) / (double)(Batches - 1));
+        var (tk, tg) = Make(B);
+        var grads = gpu.Backward(tk, tg);                    // GPU forward+backward
+        var gobj = cpu.DeserializeGradient(GradBytes(grads));
+        cpu.Step(gobj, lr, scale: B);                        // CPU Adam (owns optimiser state)
+        gpu.UpdateParams(cpu.Serialize());                   // re-sync params to GPU
+        if (it == 1 || it % 50 == 0) Console.WriteLine($"  batch {it,3}/{Batches}: copy-first accuracy {Acc():P1}");
+    }
+    var ms = sw.Elapsed.TotalMilliseconds;
+    Console.WriteLine($"\n  final accuracy {Acc():P1}   (chance {1.0 / V:P1})");
+    Console.WriteLine($"  {Batches} batches x B={B} in {ms / 1000:F1}s  ({ms / Batches:F1} ms/batch)");
+
+    var (ctk, ctg) = Make(B); var cdata = new (int[], int)[B]; for (var i = 0; i < B; i++) cdata[i] = (ctk[i], ctg[i]);
+    var sw2 = System.Diagnostics.Stopwatch.StartNew(); cpu.TrainEpoch(cdata, B, 1e-3, 1); var cpuMs = sw2.Elapsed.TotalMilliseconds;
+    Console.WriteLine($"  one batch B={B}: GPU-hybrid {ms / Batches:F1} ms   CPU TrainEpoch(16-core) {cpuMs:F0} ms   speedup ~{cpuMs / (ms / Batches):F1}x");
+    Console.WriteLine(Acc() > 0.5 ? "\n  IT LEARNS ON GPU — the full GPU training path works end-to-end." : "\n  did not learn — investigate.");
+    GpuDevice.Shutdown();
+}

@@ -106,6 +106,19 @@ public sealed partial class GpuModel : IDisposable
         return outp;
     }
 
+    /// <summary>Re-upload params from a fresh Serialize() (after a CPU Adam step) — cheap (params ≪ activations),
+    /// no kernel recompile. Lets the GPU do forward+backward while the CPU owns the optimiser state.</summary>
+    public void UpdateParams(byte[] serialized)
+    {
+        using var r = new BinaryReader(new MemoryStream(serialized));
+        for (var i = 0; i < 6; i++) r.ReadInt32();   // header: v,s,layers,maxT,d,frozen
+        float[] Read(int n) { var a = new float[n]; for (var i = 0; i < n; i++) a[i] = (float)r.ReadDouble(); return a; }
+        _emb.CopyFromCPU(Read(_v * _d));
+        _pos.CopyFromCPU(Read(_maxT * _d));
+        _cbias.CopyFromCPU(Read(_v));
+        for (var l = 0; l < _layers; l++) _banks[l].CopyFromCPU(Read(7 * _s * _d));
+    }
+
     public void Dispose()
     {
         _emb.Dispose(); _pos.Dispose(); _cbias.Dispose();
