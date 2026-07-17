@@ -210,6 +210,12 @@ else if (mode == "studiobench")
         var cpuMs = sw.Elapsed.TotalMilliseconds / Reps;
         Console.WriteLine($"  {label,-16} {gpuMs,9:F1} {cpuMs,16:F1} {"~" + (cpuMs / Math.Max(0.01, gpuMs)).ToString("F1") + "x",9}");
     }
+    // realistic RAGGED mix — like the real Studio loop: mostly short (pairs) + ~1/6 full-1024 (text windows). Tests the length-bucketing.
+    List<(int[] Ctx, int Target)> Ragged() { var l = new List<(int[], int)>(); for (var i = 0; i < B; i++) { var len = rng.Next(6) == 0 ? PrismSpec.Context : 32 + rng.Next(160); var c = new int[len]; for (var t = 0; t < len; t++) c[t] = rng.Next(PrismSpec.Vocab); l.Add((c, rng.Next(PrismSpec.Vocab))); } return l; }
+    tr.TrainBatch(Ragged(), 1e-3);
+    var sw2 = System.Diagnostics.Stopwatch.StartNew(); for (var r = 0; r < Reps; r++) tr.TrainBatch(Ragged(), 1e-3); var gRag = sw2.Elapsed.TotalMilliseconds / Reps;
+    cpu.TrainEpoch(Ragged(), B, 1e-3, 1); sw2.Restart(); for (var r = 0; r < Reps; r++) cpu.TrainEpoch(Ragged(), B, 1e-3, r); var cRag = sw2.Elapsed.TotalMilliseconds / Reps;
+    Console.WriteLine($"  {"ragged pairs+1024",-16} {gRag,9:F1} {cRag,16:F1} {"~" + (cRag / Math.Max(0.01, gRag)).ToString("F1") + "x",9}  <- the real Studio case (length-bucketed)");
     Console.WriteLine("\n  >1x = wiring GPU into Studio's TrainBatch is a real win. <1x = the per-batch param-sync overhead dominates at");
     Console.WriteLine("  this batch size; Studio would need bigger batches or a pure-GPU Adam (drops the resync) to benefit.");
     GpuDevice.Shutdown();
