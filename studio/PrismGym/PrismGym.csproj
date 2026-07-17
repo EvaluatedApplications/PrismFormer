@@ -16,6 +16,8 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\PrismFormer.csproj" />
+    <!-- GPU backend (ILGPU→CUDA); auto-detects a GPU, falls back to CPU. Training uses it when GpuDevice.HasGpu. -->
+    <ProjectReference Include="..\..\gpu\PrismFormerGpu.csproj" />
     <!-- Reads the official BabyLM Strict-Small corpus (a single Parquet file) for BabyLmRun. -->
     <PackageReference Include="Parquet.Net" Version="6.0.3" />
   </ItemGroup>

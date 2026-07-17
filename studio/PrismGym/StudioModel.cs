@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using PrismFormer;
+using PrismFormer.Gpu;
 
 namespace PrismGym;
 
@@ -115,6 +116,12 @@ public sealed class StudioModel
         if (corpus.Count == 0 && PairSource.FromFolders(PrismSpec.Context, _v, PairsDir, GossipDir).Count == 0 && _inbox.IsEmpty)
         { report("no training data — add files to data/text or data/pairs"); return; }
         report("training…"); log("[train] started");
+        // GPU acceleration: build a GpuTrainer once (kernels compile ~1-2s) if a CUDA GPU is present and we're not the
+        // relay host. CPU model stays the source of truth (serve/bleed/save read it); the GPU just does fwd+bwd ~10x
+        // faster. Falls back to CPU per-batch on any GPU error (e.g. a full-1024 window OOMing the card).
+        GpuTrainer? gpu = null;
+        try { if (GpuDevice.HasGpu) { gpu = new GpuTrainer(_model); log($"[train] GPU acceleration ON — {GpuDevice.Describe}"); } else log("[train] no CUDA GPU — training on CPU"); }
+        catch (Exception e) { log("[train] GPU init failed → CPU: " + e.Message.Split('\n')[0]); gpu = null; }
         // FULL speed: no priority gimping (that was the ~60% CPU). EvalApp is data-parallel and schedules any overflow.
         // WARMUP: the first batch is TINY so feedback lands in seconds, then it doubles up to fill every core.
         var lr = 1.5e-3 * Math.Min(1.0, 4.0 / PrismSpec.Layers);
@@ -148,7 +155,14 @@ public sealed class StudioModel
                 var drained = 0; while (drained < 32 && _inbox.TryDequeue(out var ex2)) { batch.Add(ex2); drained++; }   // network-fed learning
                 if (batch.Count == 0) break;
                 var bt0 = sw.Elapsed.TotalSeconds;
-                lock (_write) { loss = _trainer.TrainBatch(batch, lr, ct); _real = true; }   // ct cancels mid-batch (per example) → Stop lands after the current example; trained → weights are real
+                lock (_write)
+                {
+                    if (gpu != null && !Hosting)   // GPU path (host mode still uses the relay trainer); fall back to CPU on any GPU error
+                        try { loss = gpu.TrainBatch(batch, lr); }
+                        catch (Exception e) { log("[train] GPU batch failed → CPU: " + e.Message.Split('\n')[0]); loss = _trainer.TrainBatch(batch, lr, ct); }
+                    else loss = _trainer.TrainBatch(batch, lr, ct);   // ct cancels mid-batch → Stop lands after the current example
+                    _real = true;   // trained → weights are real
+                }
                 stepTotal += batch.Count;
                 var secs = sw.Elapsed.TotalSeconds;
                 var wps = batch.Count / Math.Max(0.01, secs - bt0);
@@ -185,6 +199,7 @@ public sealed class StudioModel
             if (!ct.IsCancellationRequested) _snapshot = Clone(_model);   // snapshot at each COMPLETED epoch (skip on cancel → faster stop)
         }
         if (!ct.IsCancellationRequested) _snapshot = Clone(_model);
+        gpu?.Dispose();
         log($"[train] done — {stepTotal:N0} windows, loss {loss:F3}");
         report($"done · {stepTotal:N0} steps · loss {loss:F3}");
     }
