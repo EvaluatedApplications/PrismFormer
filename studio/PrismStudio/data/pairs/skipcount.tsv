@@ -1,0 +1,8 @@
+count by 2: 2 4 6 next	add 2, 6 + 2 = 8, next is 8
+count by 5: 5 10 15 next	add 5, 15 + 5 = 20, next is 20
+count by 10: 10 20 30 next	add 10, 30 + 10 = 40, next is 40
+count by 3: 3 6 9 next	add 3, 9 + 3 = 12, next is 12
+count by 2 from 10: 10 12 14 next	add 2, 14 + 2 = 16, next is 16
+count back by 2: 10 8 6 next	take 2, 6 - 2 = 4, next is 4
+count by 4: 4 8 12 next	add 4, 12 + 4 = 16, next is 16
+count by 5 from 20: 20 25 30 next	add 5, 30 + 5 = 35, next is 35
