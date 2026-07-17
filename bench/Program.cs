@@ -30,6 +30,7 @@ if (args.Contains("--upgrade-lm")) { UpgradeBench.RunLm(); return; }   // BENEFI
 if (args.Contains("--upgrade")) { UpgradeBench.Run(); return; }   // perf cost of the expand-in-place upgrades (grow Shifts / grow Context)
 if (args.Contains("--vision")) { VisionBench.Run(epochs == 150 ? 24 : epochs); return; }   // isolated capability: ASCII-raster recognition + generation
 if (args.Contains("--spectral")) { SpectralBench.Run(); return; }   // proof-of-concept: encode a sound/vibration spectrum via the number codec, test similarity/anomaly geometry (no training)
+if (args.Contains("--spectral-seq")) { SpectralSeqBench.Run(); return; }   // spectral PrismFormer: train on normal machine rhythm (log-freq tokens), detect anomalies by prediction surprise
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
