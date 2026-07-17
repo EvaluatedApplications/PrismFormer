@@ -34,6 +34,7 @@ if (args.Contains("--spectral-seq")) { SpectralSeqBench.Run(); return; }   // sp
 if (args.Contains("--vision-codec")) { VisionCodecBench.Run(); return; }   // holographic image codec: shape = bundle(positionFace), position-invariant recognition by correlation (no training)
 if (args.Contains("--hash")) { HashBench.Run(); return; }   // hash learnability: held-out generalisation collapses as diffusion increases (memorise vs learn)
 if (args.Contains("--assoc")) { AssocBench.Run(); return; }   // disorder-codec associative memory: reverse hash-lookup of STORED pairs (a rainbow table), capacity-limited, 0% unseen
+if (args.Contains("--crack")) { HashCrackBench.Run(); return; }   // train to invert small permutation hashes; measure held-out LOSS vs chance (how close it gets)
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
