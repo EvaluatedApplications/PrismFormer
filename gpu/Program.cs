@@ -171,7 +171,7 @@ else if (mode == "backward")
     using var r = new BinaryReader(new MemoryStream(gbytes));   // SerializeGradient: no header, pure Pairs-order doubles
     var cpuFlat = new List<double>(); while (r.BaseStream.Position < gbytes.Length) cpuFlat.Add(r.ReadDouble());
 
-    var gpuFlat = gm.Backward(toks, tgt);
+    var (gpuFlat, _) = gm.Backward(toks, tgt);
     if (cpuFlat.Count != gpuFlat.Length) { Console.WriteLine($"  LENGTH MISMATCH cpu {cpuFlat.Count} gpu {gpuFlat.Length}"); GpuDevice.Shutdown(); return; }
 
     (double w, double wr) Sec(int lo, int hi) { double w = 0, wr = 0; for (var i = lo; i < hi; i++) { var e = Math.Abs(gpuFlat[i] - cpuFlat[i]); if (e > w) w = e; var rel = e / (Math.Abs(cpuFlat[i]) + 1e-4); if (rel > wr) wr = rel; } return (w, wr); }
@@ -185,6 +185,33 @@ else if (mode == "backward")
     Console.WriteLine($"\n  OVERALL worst abs {W:E2}  worst rel {WR:E2}   ({gpuFlat.Length:N0} params, B={B})");
     Console.WriteLine(W < 1e-2 ? "\n  BACKWARD MATCHES CPU (fp32-close) — GPU forward+backward is correct. GPU training is unblocked."
                               : "\n  MISMATCH — a grad section is off (see per-section above).");
+    GpuDevice.Shutdown();
+}
+else if (mode == "studiobench")
+{
+    // Does the GPU actually WIN at Studio's real config + batch size? Measure before touching the app.
+    Console.WriteLine($"Studio-config GPU vs CPU per-batch — device: {GpuDevice.Describe}\n");
+    var cpu = PrismSpec.NewModel();
+    Console.WriteLine($"  production model: {cpu.ParamCount:N0} params  (V{PrismSpec.Vocab} d{PrismSpec.Dim} L{PrismSpec.Layers} S{PrismSpec.Shifts} ctx{PrismSpec.Context})\n");
+    using var tr = new GpuTrainer(cpu);
+    var rng = new Random(3);
+    const int B = 64, Reps = 8;
+    List<(int[] Ctx, int Target)> Batch(int lo, int hi) { var l = new List<(int[], int)>(); for (var i = 0; i < B; i++) { var len = lo + rng.Next(hi - lo); var c = new int[len]; for (var t = 0; t < len; t++) c[t] = rng.Next(PrismSpec.Vocab); l.Add((c, rng.Next(PrismSpec.Vocab))); } return l; }
+    Console.WriteLine($"  {"batch seq len",-16} {"GPU ms",9} {"CPU 16-core ms",16} {"speedup",9}");
+    foreach (var (label, lo, hi) in new[] { ("short 64-192", 64, 192), ("medium 256-512", 256, 512) })
+    {
+        tr.TrainBatch(Batch(lo, hi), 1e-3);   // warm up (kernel JIT + buffers)
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        for (var r = 0; r < Reps; r++) tr.TrainBatch(Batch(lo, hi), 1e-3);
+        var gpuMs = sw.Elapsed.TotalMilliseconds / Reps;
+        cpu.TrainEpoch(Batch(lo, hi), B, 1e-3, 1);   // warm
+        sw.Restart();
+        for (var r = 0; r < Reps; r++) cpu.TrainEpoch(Batch(lo, hi), B, 1e-3, r);
+        var cpuMs = sw.Elapsed.TotalMilliseconds / Reps;
+        Console.WriteLine($"  {label,-16} {gpuMs,9:F1} {cpuMs,16:F1} {"~" + (cpuMs / Math.Max(0.01, gpuMs)).ToString("F1") + "x",9}");
+    }
+    Console.WriteLine("\n  >1x = wiring GPU into Studio's TrainBatch is a real win. <1x = the per-batch param-sync overhead dominates at");
+    Console.WriteLine("  this batch size; Studio would need bigger batches or a pure-GPU Adam (drops the resync) to benefit.");
     GpuDevice.Shutdown();
 }
 else if (mode == "train")
@@ -204,7 +231,7 @@ else if (mode == "train")
     {
         var lr = 3e-3 * (1.0 - 0.9 * (it - 1) / (double)(Batches - 1));
         var (tk, tg) = Make(B);
-        var grads = gpu.Backward(tk, tg);                    // GPU forward+backward
+        var (grads, _) = gpu.Backward(tk, tg);               // GPU forward+backward
         var gobj = cpu.DeserializeGradient(GradBytes(grads));
         cpu.Step(gobj, lr, scale: B);                        // CPU Adam (owns optimiser state)
         gpu.UpdateParams(cpu.Serialize());                   // re-sync params to GPU

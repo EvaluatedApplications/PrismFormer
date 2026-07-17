@@ -61,7 +61,7 @@ public sealed partial class GpuModel
 
     /// <summary>Forward+backward a batch (B seqs × T tokens, targets[B]). Returns gradients flat in Pairs order
     /// (Emb, Pos, C, then per layer Rq,Rk,Rv,Ro,A1,Ag,Ao) — same layout as AlgFormer.SerializeGradient.</summary>
-    public float[] Backward(int[][] tokens, int[] targets)
+    public (float[] grads, double loss) Backward(int[][] tokens, int[] targets)
     {
         int B = tokens.Length, d = _d, T = 0;
         for (var b = 0; b < B; b++) if (tokens[b].Length > T) T = tokens[b].Length;   // right-pad to batch max
@@ -109,11 +109,12 @@ public sealed partial class GpuModel
         _logits(B * _v, _emb.View, _cbias.View, Xs[_layers].View, dlens.View, dlogB.View, d, _v, T);
         _acc.Synchronize();
         var lg = dlogB.GetAsArray1D();
-        var dlog = new float[B * _v];
+        var dlog = new float[B * _v]; double loss = 0;
         for (var b = 0; b < B; b++)
         {
             var mx = float.NegativeInfinity; for (var w = 0; w < _v; w++) if (lg[b * _v + w] > mx) mx = lg[b * _v + w];
             double sum = 0; for (var w = 0; w < _v; w++) sum += Math.Exp(lg[b * _v + w] - mx);
+            loss += -(lg[b * _v + targets[b]] - mx - Math.Log(sum));
             for (var w = 0; w < _v; w++) { var p = (float)(Math.Exp(lg[b * _v + w] - mx) / sum); dlog[b * _v + w] = p - (w == targets[b] ? 1f : 0f); }
         }
         using var ddlog = _acc.Allocate1D(dlog);
@@ -167,6 +168,6 @@ public sealed partial class GpuModel
         outp.AddRange(gEmb.GetAsArray1D()); outp.AddRange(gPos.GetAsArray1D()); outp.AddRange(gC.GetAsArray1D());
         for (var l = 0; l < _layers; l++) { outp.AddRange(gBanks[l].GetAsArray1D()); gBanks[l].Dispose(); }
         foreach (var b in bufs) b.Dispose();
-        return outp.ToArray();
+        return (outp.ToArray(), loss / B);
     }
 }
