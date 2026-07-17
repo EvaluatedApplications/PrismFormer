@@ -25,7 +25,7 @@ namespace PrismFormer;
 /// </summary>
 public sealed class SwarmChatter
 {
-    const byte HELLO = 1, PAIR = 2, QUERY = 3, ANSWER = 4, WSLICE = 5, PING = 6, PONG = 7, GOSSIP = 8, GROUPMSG = 9, GROUPASK = 10, GROUPREPLY = 11;
+    const byte HELLO = 1, PAIR = 2, QUERY = 3, ANSWER = 4, WSLICE = 5, PING = 6, PONG = 7, GOSSIP = 8, GROUPMSG = 9, GROUPASK = 10, GROUPREPLY = 11, ROSTER = 12;
     readonly string _room;
     readonly byte[] _self = Guid.NewGuid().ToByteArray();   // 16 bytes
     readonly string _selfHex;
@@ -138,6 +138,16 @@ public sealed class SwarmChatter
         foreach (var id in targets) SendTo(id, WSLICE, payload);
     }
 
+    /// <summary>DIRECTORY: broadcast the full live-peer roster to the shared room topic so EVERY node learns the complete
+    /// membership from one common point — not just transitive nearest-neighbour gossip — giving consistent peer counts.
+    /// Meant for the always-on anchor (it hears every HELLO). New tag: nodes on an older build ignore it (unknown tag =
+    /// no-op) and it does NOT change the spec Signature, so it's fully backward-compatible with existing peers.</summary>
+    public void BroadcastRoster()
+    {
+        var live = LivePeers();
+        if (live.Count > 0) Send(ROSTER, PackIds(live.Take(256).ToArray()));   // shared topic → all subscribers receive it
+    }
+
     /// <summary>The networked REPL: ask the K NEAREST peers for a continuation, collect their answers briefly, return the
     /// most confident (or null if none answer).</summary>
     public (double Conf, string Continuation)? AskSwarm(string prompt, int timeoutMs = 8000)
@@ -202,6 +212,7 @@ public sealed class SwarmChatter
             switch (tag)
             {
                 case GOSSIP:   // learn of peers we haven't met — PROBE each unknown one; it enters the roster only if it answers (PONG)
+                case ROSTER:   // the anchor's full-membership directory broadcast (same handling: probe every unknown id) — gives consistent peer counts from one common point. Old builds don't send it and ignore receiving it (unknown tag → no-op).
                 {
                     using var r = new BinaryReader(new MemoryStream(payload));
                     var cnt = r.ReadInt32();

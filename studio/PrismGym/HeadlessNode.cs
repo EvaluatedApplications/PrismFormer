@@ -165,6 +165,7 @@ public static class HeadlessNode
             try   // PASSIVE but ACTIVE-DRIVER: share what we ALREADY have + drive the chat by querying peers. No gradient steps — the anchor never trains.
             {
                 Log($"[mesh] {chatter.PeerCount} peer(s) nearby");
+                chatter.BroadcastRoster();   // directory: push the full membership so every (updated) node sees a consistent peer count
                 if (model.WeightSlice(Random.Shared, 1024) is { } ws) chatter.ShareWeightSlice(ws.Start, ws.Vals);
                 if (model.RandomPair(Random.Shared) is { } p) chatter.SharePair(p.Prompt, p.Target);
                 // Always-on chat driver: take a natural prefix of the GROUP chat context we've been accumulating and ask a
