@@ -157,7 +157,10 @@ public sealed class StudioModel
                 var bt0 = sw.Elapsed.TotalSeconds;
                 lock (_write)
                 {
-                    if (gpu != null && !Hosting)   // GPU path (host mode still uses the relay trainer); fall back to CPU on any GPU error
+                    // GPU trains the batch LOCALLY and writes to the CPU model (source of truth). We're a host by default
+                    // but yield to the network between batches (bleed/gossip run on their own timers off the fresh _model),
+                    // so hosting no longer means CPU — the GPU does the compute. Fall back to CPU on any GPU error.
+                    if (gpu != null)
                         try { loss = gpu.TrainBatch(batch, lr); }
                         catch (Exception e) { log("[train] GPU batch failed → CPU: " + e.Message.Split('\n')[0]); loss = _trainer.TrainBatch(batch, lr, ct); }
                     else loss = _trainer.TrainBatch(batch, lr, ct);   // ct cancels mid-batch → Stop lands after the current example
