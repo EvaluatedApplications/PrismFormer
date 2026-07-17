@@ -111,6 +111,16 @@ else if (mode == "relbank")
     Console.WriteLine("\nThe custom relation-bank op ports correctly to GPU — the forward backbone (Rq/Rk/Rv/Ro) is unblocked.");
     GpuDevice.Shutdown();
 }
+else if (mode == "relback")
+{
+    Console.WriteLine($"relation-bank BACKWARD gradcheck — device: {GpuDevice.Describe}\n");
+    var (wg, wx) = GpuOps.VerifyRelBankBackward();
+    Console.WriteLine($"  gbank (grad to bank): worst abs err {wg:E2}");
+    Console.WriteLine($"  dX    (grad to input): worst abs err {wx:E2}");
+    Console.WriteLine((wg < 1e-3 && wx < 1e-3) ? "\n  RELBANK BACKWARD MATCHES CPU (fp32-close) — the backbone of the backward pass is verified."
+                                              : "\n  MISMATCH — kernel bug.");
+    GpuDevice.Shutdown();
+}
 else if (mode == "forward")
 {
     // The milestone: a whole batched PrismFormer forward on GPU, gradchecked against CPU AlgFormer.LogitsFor.
@@ -139,5 +149,41 @@ else if (mode == "forward")
     Console.WriteLine($"  argmax agreement (GPU prediction == CPU): {agree}/{B}  ({(double)agree / B:P1})");
     Console.WriteLine(agree == B ? "\n  FORWARD MATCHES — a full PrismFormer forward pass runs on GPU and agrees with CPU (fp32-close)."
                                  : "\n  MISMATCH — a kernel or layout bug to chase.");
+    GpuDevice.Shutdown();
+}
+else if (mode == "backward")
+{
+    // The training milestone: GPU gradients vs CPU AlgFormer gradients (summed over the batch), per section.
+    Console.WriteLine($"GPU backward gradcheck vs CPU AlgFormer — device: {GpuDevice.Describe}\n");
+    const int V = 32, d = 256, S = 8, L = 2, T = 9, B = 64;
+    var cpu = new AlgFormer(V, shifts: S, layers: L, maxContext: T, dModel: d, frozenPrefix: 0, embedSeed: null, seed: 5);
+    var trng = new Random(13);
+    for (var i = 0; i < 200; i++) { var c = new int[T]; for (var t = 0; t < T; t++) c[t] = trng.Next(V); cpu.TrainStep(c, trng.Next(V), 2e-3); }
+
+    using var gm = new GpuModel(cpu.Serialize());
+    var rng = new Random(9);
+    var toks = new int[B][]; var tgt = new int[B];
+    for (var b = 0; b < B; b++) { toks[b] = new int[T]; for (var t = 0; t < T; t++) toks[b][t] = rng.Next(V); tgt[b] = rng.Next(V); }
+
+    var g = cpu.NewGrads();
+    for (var b = 0; b < B; b++) cpu.Accumulate(toks[b], tgt[b], g);
+    var gbytes = cpu.SerializeGradient(g);
+    using var r = new BinaryReader(new MemoryStream(gbytes));   // SerializeGradient: no header, pure Pairs-order doubles
+    var cpuFlat = new List<double>(); while (r.BaseStream.Position < gbytes.Length) cpuFlat.Add(r.ReadDouble());
+
+    var gpuFlat = gm.Backward(toks, tgt);
+    if (cpuFlat.Count != gpuFlat.Length) { Console.WriteLine($"  LENGTH MISMATCH cpu {cpuFlat.Count} gpu {gpuFlat.Length}"); GpuDevice.Shutdown(); return; }
+
+    (double w, double wr) Sec(int lo, int hi) { double w = 0, wr = 0; for (var i = lo; i < hi; i++) { var e = Math.Abs(gpuFlat[i] - cpuFlat[i]); if (e > w) w = e; var rel = e / (Math.Abs(cpuFlat[i]) + 1e-4); if (rel > wr) wr = rel; } return (w, wr); }
+    int emb = V * d, pos = T * d, cc = V, bank = 7 * S * d;
+    var off = 0;
+    Console.WriteLine($"  {"section",-10} {"worst abs",11} {"worst rel",11}");
+    void Show(string name, int len) { var (w, wr) = Sec(off, off + len); Console.WriteLine($"  {name,-10} {w,11:E2} {wr,11:E2}"); off += len; }
+    Show("Emb", emb); Show("Pos", pos); Show("C", cc);
+    for (var l = 0; l < L; l++) Show($"layer{l}", bank);
+    var (W, WR) = Sec(0, gpuFlat.Length);
+    Console.WriteLine($"\n  OVERALL worst abs {W:E2}  worst rel {WR:E2}   ({gpuFlat.Length:N0} params, B={B})");
+    Console.WriteLine(W < 1e-2 ? "\n  BACKWARD MATCHES CPU (fp32-close) — GPU forward+backward is correct. GPU training is unblocked."
+                              : "\n  MISMATCH — a grad section is off (see per-section above).");
     GpuDevice.Shutdown();
 }

@@ -60,4 +60,43 @@ public static class GpuOps
         var gpuMs = sw.Elapsed.TotalMilliseconds / reps;
         return (worst, gpuMs, cpuMs);
     }
+
+    // Backward of relbank (mirrors AlgFormer.AlgBack). Two race-free outputs:
+    //   gbank[k,i] = Σ_row dOut[row,i]·x[row,(i+k)%d]              (one thread per (k,i), reduces over rows)
+    //   dX[row,p]  = Σ_k   dOut[row,(p-k)%d]·bank[k,(p-k)%d]       (one thread per (row,p), reduces over k)
+    static void GBankKernel(Index1D idx, ArrayView<float> dOut, ArrayView<float> x, ArrayView<float> gbank, int BT, int d, int s)
+    { int i = idx % d, k = idx / d; float a = 0f; for (var row = 0; row < BT; row++) { var xi = i + k; if (xi >= d) xi -= d; a += dOut[row * d + i] * x[row * d + xi]; } gbank[idx] = a; }
+    static void DxKernel(Index1D idx, ArrayView<float> dOut, ArrayView<float> bank, ArrayView<float> dX, int d, int s)
+    { int p = idx % d, row = idx / d; float a = 0f; for (var k = 0; k < s; k++) { var q = p - k; if (q < 0) q += d; a += dOut[row * d + q] * bank[k * d + q]; } dX[idx] = a; }
+
+    /// <summary>Verify the relation-bank BACKWARD (gbank + dX) against the CPU double definition of AlgBack.</summary>
+    public static (double worstG, double worstX) VerifyRelBankBackward(int BT = 512, int d = 256, int s = 16, int seed = 2)
+    {
+        var acc = GpuDevice.Accelerator ?? throw new InvalidOperationException("no accelerator");
+        var rng = new Random(seed);
+        var x = new float[BT * d]; var bank = new float[s * d]; var dOut = new float[BT * d];
+        for (var i = 0; i < x.Length; i++) x[i] = (float)(rng.NextDouble() - 0.5);
+        for (var i = 0; i < bank.Length; i++) bank[i] = (float)(rng.NextDouble() - 0.5);
+        for (var i = 0; i < dOut.Length; i++) dOut[i] = (float)(rng.NextDouble() - 0.5);
+
+        var gb = acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(GBankKernel);
+        var dxk = acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int>(DxKernel);
+        using var dx = acc.Allocate1D(x); using var dbank = acc.Allocate1D(bank); using var ddout = acc.Allocate1D(dOut);
+        using var dgbank = acc.Allocate1D<float>(s * d); using var ddx = acc.Allocate1D<float>(BT * d);
+        gb(s * d, ddout.View, dx.View, dgbank.View, BT, d, s);
+        dxk(BT * d, ddout.View, dbank.View, ddx.View, d, s);
+        acc.Synchronize();
+        var gbGpu = dgbank.GetAsArray1D(); var dxGpu = ddx.GetAsArray1D();
+
+        // CPU reference in double, straight from the AlgBack formula
+        var gbCpu = new double[s * d]; var dxCpu = new double[BT * d];
+        for (var row = 0; row < BT; row++)
+            for (var i = 0; i < d; i++)
+                for (var k = 0; k < s; k++) { var xi = i + k; if (xi >= d) xi -= d; gbCpu[k * d + i] += (double)dOut[row * d + i] * x[row * d + xi]; dxCpu[row * d + xi] += (double)dOut[row * d + i] * bank[k * d + i]; }
+
+        double wg = 0, wx = 0;
+        for (var i = 0; i < gbCpu.Length; i++) wg = Math.Max(wg, Math.Abs(gbGpu[i] - gbCpu[i]));
+        for (var i = 0; i < dxCpu.Length; i++) wx = Math.Max(wx, Math.Abs(dxGpu[i] - dxCpu[i]));
+        return (wg, wx);
+    }
 }

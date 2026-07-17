@@ -15,7 +15,7 @@ namespace PrismFormer.Gpu;
 /// Logits at the last position: C[w] + Σ emb[w]·h_last. Gradchecked against AlgFormer.LogitsFor — the CPU stays the
 /// oracle; GPU is fp32-close, not bit-identical. (Non-bind GLU path only, the default.)
 /// </summary>
-public sealed class GpuModel : IDisposable
+public sealed partial class GpuModel : IDisposable
 {
     readonly Accelerator _acc;
     readonly int _v, _s, _layers, _maxT, _d;
@@ -57,6 +57,7 @@ public sealed class GpuModel : IDisposable
         _glu = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>>((idx, aval, gt, z) => z[idx] = aval[idx] * (1f / (1f + XMath.Exp(-gt[idx]))));
         _logits = _acc.LoadAutoGroupedStreamKernel<Index1D, ArrayView<float>, ArrayView<float>, ArrayView<float>, ArrayView<float>, int, int, int>(
             (idx, emb, cbias, h, outp, d, V, T) => { int w = idx % V, b = idx / V; var row = b * T + (T - 1); float a = cbias[w]; for (var i = 0; i < d; i++) a += emb[w * d + i] * h[row * d + i]; outp[idx] = a; });
+        InitBackward();
     }
 
     /// <summary>Forward a batch of B sequences, each exactly T tokens (T ≤ maxContext). Returns logits[B][V] at the last position.</summary>
