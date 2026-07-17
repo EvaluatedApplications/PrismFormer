@@ -174,6 +174,28 @@ no separate protocol.
 
 ---
 
+## 10. Reduced-round neural distinguisher — PrismFormer against the holy grail (MEASURED)
+
+Bench `--distinguish` (CryptoDistinguisherBench). Gohr-style (CRYPTO 2019): don't INVERT a hash (hopeless) — DISTINGUISH
+round-reduced output from RANDOM. A model beating 50% has DISCOVERED residual non-randomness nobody designed. Setup: a
+32-bit ARX+S-box bijection, fixed input difference 0x11; REAL = output pair from (x, x^δ), RANDOM = two uniform words;
+**fresh data every step + 2³² pairs → memorising impossible**, so any edge is genuine structure. PrismFormer only, 133k
+params (user dropped the transformer baseline — capability, not superiority, claim).
+
+RESULT — distinguisher accuracy by rounds: R1 91.3%, **R2 98.0%, R3 97.7%, R4 95.1%**, R5 49.9%, R6 50.1% (chance,
+±0.3% noise). **Reach = 4 rounds, razor-sharp wall at 5.** The R5 = dead-50% (not merely low) means the structure is
+GONE (full diffusion), not undertrained — more compute won't move it. So the relational phasor substrate genuinely
+DISCOVERS the differential relationship between the two outputs (discovery, not design — no attack coded), then hits the
+exact theoretical boundary.
+
+Scope/honesty: toy 32-bit cipher of our own design, fully diffuses in 5 rounds → "reach 4" = to within one round of full
+diffusion (strong in Gohr terms, but a toy). No baseline → capability not superiority. Full/deployed crypto UNTOUCHED
+(this is NOT a key-sniffer: unkeyed permutation, distinguisher not key-recovery, chosen-plaintext not passive-sniff — see
+session notes). Reconciles with the paper-1 hash wall: INVERSION is hopeless, but DISTINGUISHING reduced-round has a
+reachable edge. Follow-ups: (a) deeper/wider cipher (diffusion in more rounds) to measure true reach; (b) add a
+transformer baseline to test if the relational substrate reaches FURTHER; (c) keyed variant → Gohr-style reduced-round
+key-recovery (academic margin research only).
+
 ## Prior art to cite (honest lineage — don't skip these)
 - **Model soups** — Wortsman et al. 2022 (averaging fine-tuned weights; works because of shared init).
 - **Federated Averaging (FedAvg)** — McMahan et al. 2017 (average weights of models on different data).
