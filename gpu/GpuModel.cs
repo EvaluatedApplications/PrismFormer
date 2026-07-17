@@ -60,6 +60,9 @@ public sealed partial class GpuModel : IDisposable
         InitBackward();
     }
 
+    /// <summary>The model's max context length (maxT) — the GPU trainer sizes its length-split threshold off this.</summary>
+    public int MaxContext => _maxT;
+
     /// <summary>Forward a batch of B sequences, each exactly T tokens (T ≤ maxContext). Returns logits[B][V] at the last position.</summary>
     public float[][] Forward(int[][] tokens)
     {

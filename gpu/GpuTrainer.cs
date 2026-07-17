@@ -6,21 +6,22 @@ using PrismFormer;
 namespace PrismFormer.Gpu;
 
 /// <summary>
-/// Drop-in GPU-accelerated batch trainer with a CPU/GPU LENGTH SPLIT. Short sequences (≤ <see cref="GpuMaxLen"/>) run
-/// on the GPU (length-bucketed so a lone long window never pads the shorts); long sequences (which OOM the card and
-/// waste the most on padding) run on the CPU in PARALLEL — so both the GPU and all cores are busy at once. Their
+/// Drop-in GPU-accelerated batch trainer with a CPU/GPU LENGTH SPLIT. Short sequences (≤ 90% of the context window)
+/// run on the GPU (length-bucketed so a lone long window never pads the shorts); the longest ~10% (near-full-context
+/// windows that OOM the card and waste the most on padding) run on the CPU in PARALLEL — so both the GPU and all cores
+/// are busy at once. Their
 /// gradients sum to the identical full-batch gradient; one CPU Adam step at the end. The CPU model stays the source of
 /// truth (serving/bleeding/saving read it). fp32 on the GPU half → float-close to the CPU double path.
 /// </summary>
 public sealed class GpuTrainer : IDisposable
 {
-    const int GpuMaxLen = 512;      // sequences longer than this go to the CPU (≈ half of Context=1024) — avoids GPU OOM
     const int TokenBudget = 32768;  // padded token-positions per GPU sub-batch (bounds memory + padding waste)
+    readonly int _gpuMaxLen;        // sequences longer than this go to the CPU: the longest ~10% of the context window
 
     readonly AlgFormer _cpu;
     readonly GpuModel _gpu;
 
-    public GpuTrainer(AlgFormer cpu) { _cpu = cpu; _gpu = new GpuModel(cpu.Serialize()); }
+    public GpuTrainer(AlgFormer cpu) { _cpu = cpu; _gpu = new GpuModel(cpu.Serialize()); _gpuMaxLen = Math.Max(1, (int)(0.9 * _gpu.MaxContext)); }
 
     static byte[] GradBytes(float[] g) { using var ms = new MemoryStream(); var w = new BinaryWriter(ms); foreach (var x in g) w.Write((double)x); w.Flush(); return ms.ToArray(); }
 
@@ -32,7 +33,7 @@ public sealed class GpuTrainer : IDisposable
 
         var shortEx = new List<(int[] Ctx, int Target)>();
         var longEx = new List<(int[] Ctx, int Target)>();
-        foreach (var e in batch) (e.Ctx.Length <= GpuMaxLen ? shortEx : longEx).Add(e);
+        foreach (var e in batch) (e.Ctx.Length <= _gpuMaxLen ? shortEx : longEx).Add(e);
 
         // CPU (long) runs concurrently with GPU (short) — both hardware halves busy at once.
         double cpuLoss = 0; AlgFormer.Grads? cpuG = null;
