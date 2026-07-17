@@ -5,6 +5,7 @@ using ILGPU;
 using ILGPU.Runtime;
 using ILGPU.Runtime.Cuda;
 using ILGPU.Runtime.CPU;
+using ILGPU.Algorithms;
 
 namespace PrismFormer.Gpu;
 
@@ -29,7 +30,7 @@ public static class GpuDevice
             if (_init) return;
             try
             {
-                _ctx = Context.Create(b => b.Cuda().CPU());
+                _ctx = Context.Create(b => b.Cuda().CPU().EnableAlgorithms());
                 var cuda = _ctx.Devices.FirstOrDefault(d => d.AcceleratorType == AcceleratorType.Cuda);
                 _acc = cuda is not null ? cuda.CreateAccelerator(_ctx) : _ctx.GetPreferredDevice(preferCPU: true).CreateAccelerator(_ctx);
             }

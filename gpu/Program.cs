@@ -6,6 +6,7 @@ using ILGPU;
 using ILGPU.Runtime;
 using ILGPU.Runtime.Cuda;
 using ILGPU.Runtime.CPU;
+using PrismFormer;
 using PrismFormer.Gpu;
 
 // PoC: prove the ILGPU -> CUDA toolchain works end-to-end on this machine before investing in the AlgFormer port.
@@ -108,5 +109,35 @@ else if (mode == "relbank")
     Console.WriteLine($"correctness vs CPU double definition: worst abs err {worst:E2}  ({(worst < 1e-3 ? "PASS (fp32-close)" : "CHECK")})");
     Console.WriteLine($"per relbank (4096 rows x 256 dim, S=16): GPU {gpuMs:F3} ms   CPU(1 thread) {cpuMs:F1} ms   speedup ~{cpuMs / Math.Max(0.001, gpuMs):F0}x");
     Console.WriteLine("\nThe custom relation-bank op ports correctly to GPU — the forward backbone (Rq/Rk/Rv/Ro) is unblocked.");
+    GpuDevice.Shutdown();
+}
+else if (mode == "forward")
+{
+    // The milestone: a whole batched PrismFormer forward on GPU, gradchecked against CPU AlgFormer.LogitsFor.
+    Console.WriteLine($"GPU forward gradcheck vs CPU AlgFormer — device: {GpuDevice.Describe}\n");
+    const int V = 32, d = 256, S = 8, L = 2, T = 9, B = 128;
+    var cpu = new AlgFormer(V, shifts: S, layers: L, maxContext: T, dModel: d, frozenPrefix: 0, embedSeed: null, seed: 3);
+    var trng = new Random(11);   // a few steps so params aren't at trivial init (forward must match at any params)
+    for (var i = 0; i < 200; i++) { var c = new int[T]; for (var t = 0; t < T; t++) c[t] = trng.Next(V); cpu.TrainStep(c, trng.Next(V), 2e-3); }
+
+    using var gm = new GpuModel(cpu.Serialize());
+    var rng = new Random(7);
+    var toks = new int[B][];
+    for (var b = 0; b < B; b++) { toks[b] = new int[T]; for (var t = 0; t < T; t++) toks[b][t] = rng.Next(V); }
+
+    var gpu = gm.Forward(toks);
+    double worst = 0, worstRel = 0; var agree = 0;
+    for (var b = 0; b < B; b++)
+    {
+        var cl = cpu.LogitsFor(toks[b]);
+        int ga = 0, ca = 0;
+        for (var w = 0; w < V; w++) { var e = Math.Abs(gpu[b][w] - cl[w]); if (e > worst) worst = e; var rel = e / (Math.Abs(cl[w]) + 1e-6); if (rel > worstRel) worstRel = rel; if (gpu[b][w] > gpu[b][ga]) ga = w; if (cl[w] > cl[ca]) ca = w; }
+        if (ga == ca) agree++;
+    }
+    Console.WriteLine($"  {B} sequences (V={V}, d={d}, layers={L}, S={S}, T={T})");
+    Console.WriteLine($"  worst abs logit err {worst:E2}   worst rel err {worstRel:E2}");
+    Console.WriteLine($"  argmax agreement (GPU prediction == CPU): {agree}/{B}  ({(double)agree / B:P1})");
+    Console.WriteLine(agree == B ? "\n  FORWARD MATCHES — a full PrismFormer forward pass runs on GPU and agrees with CPU (fp32-close)."
+                                 : "\n  MISMATCH — a kernel or layout bug to chase.");
     GpuDevice.Shutdown();
 }
