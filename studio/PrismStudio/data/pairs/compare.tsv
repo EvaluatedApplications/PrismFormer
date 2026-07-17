@@ -1,0 +1,12 @@
+which is bigger, 47 or 74	compare tens: 7 > 4, so 74
+which is bigger, 8 or 5	8 > 5, so 8
+which is smaller, 12 or 21	compare tens: 1 < 2, so 12
+largest of 3 8 5	8 is more than 3 and 5, so 8
+smallest of 9 2 6	2 is less than 9 and 6, so 2
+which is bigger, 100 or 99	100 has more digits, so 100
+which is bigger, 34 or 43	compare tens: 3 < 4, so 43
+largest of 5 5 7	7 is the biggest, so 7
+which is smaller, 6 or 60	6 has fewer digits, so 6
+order 3 1 2 smallest first	smallest is 1, then 2, then 3, = 1 2 3
+order 5 2 8 smallest first	smallest is 2, then 5, then 8, = 2 5 8
+which is bigger, 19 or 91	compare tens: 1 < 9, so 91
