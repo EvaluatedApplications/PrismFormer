@@ -125,13 +125,15 @@ SEED the embedding table = free warm-start. Rare word still placed by its chars;
 UNBUILT. Experiment: small corpus → build token vectors → (a) nearest-neighbours sensible, (b) seed AlgFormer,
 measure training head-start vs random init.
 
-**9.3 LOAD-BEARING CAVEAT (measured, `--codec-baseline`):** seeding only helps an architecture that can EXPLOIT the
-structure. Ran the paper-1 §6-A control (seed a MiniTransformer's embeddings from the codec vs random): the
-transformer got ZERO benefit (both ~chance held-out). BUT it only fit 16–24% of TRAIN (AlgFormer 100%) → undertrained
-→ §6-A still NOT conclusively settled (needs a tuned/longer transformer that actually fits). Suggestive: attention
-can't use phasor geometry, AlgFormer's bind/correlate can — so the whole head-start thread is conditional on the
-exploiting architecture. NOTE: not param-matched here (transformer 805k vs AlgFormer 242k), so no clean pound-for-pound
-claim from this bench; the paper's matched head-to-head stands separately.
+**9.3 SETTLED (measured, `--codec-baseline`, now 5-seed + TUNED transformer that FITS):** re-ran the paper-1 §6-A
+control properly — transformer given warmup+cosine so it fits train (95%, vs the first pass's 16–24% underfit), 5 seeds,
+mean±sd. RESULT: **codec-seeding the transformer HURTS it, on every seed** — held-out 31.3%±21.3% (random) → 9.1%±6.9%
+(seeded), and the seeded one can't even fit train as well (63% vs 95%). So the confound is REFUTED the strong way: the
+codec is not a transferable free head-start; the same phasor geometry AlgFormer's bind/correlate exploit is a LIABILITY
+to attention. IMPORTANT/honest: on this tiny single-token task AlgFormer (45.8%±15.9%) vs the tuned random transformer
+(31.3%±21.3%) is WITHIN NOISE (xf wins 2/5 seeds; mean gap +14.5% not significant at n=5) — so I did NOT claim an
+architecture win from this bench; that separation lives in the worked-multidigit (§4.3) + relational (§4.2) results.
+**Elevated into paper 1: new §4.7 "The codec-seeded baseline control" + rewrote the §6 open-confound para as resolved.**
 
 **9.4 Hybrid char + mixed-length vocab.** Single chars = ATOMIC BASE = complete fallback → no OOV ever → makes it SAFE
 to promote the most-frequent sequences of ANY length (BPE / WordPiece / Unigram-LM) to their own tokens, each seeded
@@ -249,8 +251,8 @@ beating a tuned GPU ResNet on try one is a long shot. Full/deployed crypto untou
 - [ ] Wire + run `--prototype` (PrototypeBench, written): few-shot curve, find where superposition saturates.
 - [ ] Text token-seeding: small corpus → build token vectors (bind chars + RI contexts) → (a) nearest-neighbours
       sensible, (b) seed AlgFormer, measure training head-start vs random init. (The core "free pretraining" claim.)
-- [ ] Finish §6-A properly: a TUNED transformer that actually FITS train, then re-measure the codec-seeding effect
-      (current run was undertrained → inconclusive).
+- [x] Finish §6-A properly: TUNED transformer (warmup+cosine, fits train 95%), 5 seeds → codec-seeding HURTS the
+      transformer (31.3%→9.1% held, fits 63% vs 95%); Alg-vs-random within noise on this toy task. DONE + in paper1 §4.7/§6.
 - [ ] Capacity bench: pack N real `Encode` faces, plot max-crosstalk + cleanup-decode acc vs N to 9k+ — verify the
       analytic "huge headroom" against the real FNV faces.
 - [ ] Masked-merge vocab consensus: fixed latent address space + active mask + content-derived addresses; does

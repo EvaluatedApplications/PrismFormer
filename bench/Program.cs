@@ -44,7 +44,9 @@ if (args.Contains("--emergence")) { EmergenceBench.Run(); return; }   // Levin-i
 if (args.Contains("--mesh")) { MeshBench.Run(); return; }   // FAITHFUL Prism Studio mesh: autonomous models chatter via weight-slice elastic-averaging + pair-gossip (NO gradient summing)
 if (args.Contains("--collapse")) { CollapseBench.Run(); return; }   // does the bleed damage holographic info? frozen vs unfrozen codec, algebra accuracy per tick — tests if the codec-pinning prevents collapse
 if (args.Contains("--average")) { XferBench.Run(); return; }   // can you average SEPARATELY-trained models? same/diff init x frozen/no codec — does the codec let genuinely-independent models average?
-if (args.Contains("--codec-baseline")) { BaselineControlBench.Run(); return; }   // paper1 §6-A control: seed the transformer baseline from the same codec — is the gap init or architecture?
+if (args.Contains("--codec-baseline")) { BaselineControlBench.Run(epochs == 150 ? 800 : epochs); return; }   // paper1 §6-A control: seed the transformer baseline from the same codec — is the gap init or architecture? (train long enough that the transformer FITS train)
+if (args.Contains("--revinfer")) { RevInferBench.Run(); return; }   // reverse inference: beat the paper's 0% via scratchpad (fact-in-context select) and algebra (commutative-bind HRR memory, reverse for free)
+if (args.Contains("--collatz")) { CollatzBench.Run(); return; }   // Collatz stopping-time probe: how much of a chaotic sequence can PrismFormer learn? (trend vs spikes, held-out + extrapolate)
 if (args.Contains("--prototype")) { PrototypeBench.Run(); return; }   // free prototype learning: bundle K holographic image encodings per class into a concept, few-shot curve, no training
 if (args.Contains("--distinguish")) { CryptoDistinguisherBench.Run(); return; }   // reduced-round neural distinguisher (Gohr-style): PrismFormer's reach at telling round-reduced output from random
 if (args.Contains("--speck")) { SpeckDistinguisherBench.Run(); return; }   // PrismFormer vs Gohr's real Speck32/64 benchmark: distinguisher accuracy at 5-8 rounds

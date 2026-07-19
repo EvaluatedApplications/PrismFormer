@@ -148,6 +148,9 @@ internal static class MultiTaskBench
         Console.WriteLine("\nsummary (mean over fair tasks & seeds) ----------------------------------------------");
         Console.WriteLine($"  fair tasks  train    : transformer {GroupTrain(xfTr, fairTasks):P1}   prismformer {GroupTrain(alTr, fairTasks):P1}");
         Console.WriteLine($"  fair tasks  held-out : transformer {GroupHeld(xfHe, fairTasks):P1}   prismformer {GroupHeld(alHe, fairTasks):P1}");
+        var fwdFair = new[] { "gt", "max", "min", "parity", "copy" };   // forward-generalising relational set; EXCLUDES reverse-inference (antonym/capital held-out are the reverse direction, ~0% for both)
+        Console.WriteLine($"  fair EXCL reverse-inference held-out : transformer {GroupHeld(xfHe, fwdFair):P1}   prismformer {GroupHeld(alHe, fwdFair):P1}   <- the alternative (cleaner) headline");
+        Console.WriteLine($"  reverse-inference only (antonym+capital held) : transformer {GroupHeld(xfHe, new[] {"antonym","capital"}):P1}   prismformer {GroupHeld(alHe, new[] {"antonym","capital"}):P1}");
         Console.WriteLine($"  (transformer train accuracy shows it IS a fitting baseline, not a strawman.)");
 
         // ---- frozen vs unfrozen identity, under SHARED multi-task load ----

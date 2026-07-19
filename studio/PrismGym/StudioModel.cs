@@ -72,10 +72,28 @@ public sealed class StudioModel
 
     string GenAnswer(string prompt, int max) => GenerateCached(_snapshot, prompt, max);   // off the snapshot; stops at STOP
 
-    /// <summary>Greedy causal generation via the KV cache (O(T)/token). Left-aligns the prompt at natural positions and
-    /// reserves window room so a typical STOP-terminated reply never leaves the fast incremental path; only an
-    /// over-long reply falls back to sliding recompute. Stops at the STOP token.</summary>
-    static int Argmax(double[] lg) { var b = 0; for (var i = 1; i < lg.Length; i++) if (lg[i] > lg[b]) b = i; return b; }
+    /// <summary>Confidence-gated causal generation via the KV cache (O(T)/token). Left-aligns the prompt at natural
+    /// positions and reserves window room so a typical STOP-terminated reply never leaves the fast incremental path;
+    /// only an over-long reply falls back to sliding recompute. Stops at the STOP token. Per token it is GREEDY when
+    /// the codec decode is sharp (arithmetic / a known answer stays EXACT) and SAMPLES only when genuinely uncertain
+    /// (a real chat branch), which is what breaks greedy's repetition loops. The codec's own peakedness routes it,
+    /// token by token: no task classifier, nothing keyed off a cue token.</summary>
+    const double DecodeConfident = 0.60;   // top-1 probability at/above which we commit greedily (an exact decode)
+    const double DecodeTemp = 0.80;        // sampling temperature used ONLY when below that confidence
+    static int PickToken(double[] lg)
+    {
+        var top = 0; var max = lg[0];
+        for (var i = 1; i < lg.Length; i++) if (lg[i] > max) { max = lg[i]; top = i; }
+        double sum = 0; for (var i = 0; i < lg.Length; i++) sum += Math.Exp(lg[i] - max);
+        if (1.0 / sum >= DecodeConfident) return top;                       // p(top) = 1/sum ; confident -> greedy (exact)
+        var tm = double.NegativeInfinity;                                   // uncertain -> sample at temperature
+        for (var i = 0; i < lg.Length; i++) { var s = lg[i] / DecodeTemp; if (s > tm) tm = s; }
+        var tp = new double[lg.Length]; double tsum = 0;
+        for (var i = 0; i < lg.Length; i++) { tp[i] = Math.Exp(lg[i] / DecodeTemp - tm); tsum += tp[i]; }
+        var r = Random.Shared.NextDouble() * tsum; double acc = 0;
+        for (var i = 0; i < lg.Length; i++) { acc += tp[i]; if (acc >= r) return i; }
+        return top;
+    }
     string GenerateCached(AlgFormer m, string prompt, int n)
     {
         var ids = _v.Encode(prompt);
@@ -87,7 +105,7 @@ public sealed class StudioModel
         var sb = new StringBuilder();
         for (var k = 0; k < n; k++)
         {
-            var t = Argmax(lg); if (t == CharVocab.End) break;
+            var t = PickToken(lg); if (t == CharVocab.End) break;
             sb.Append(_v.Chr(t)); window.Add(t);
             if (cache.Length < PrismSpec.Context) lg = m.Step(cache, t);          // O(T) fast path
             else lg = m.Prime(cache, window.GetRange(window.Count - (PrismSpec.Context - 1), PrismSpec.Context - 1).ToArray());   // window full → slide-recompute
@@ -176,11 +194,12 @@ public sealed class StudioModel
                 {
                     lastSample = secs;
                     var name = srcs[sampleTick++ % srcs.Count].Name;
+                    const int preview = 200;   // chars generated for the progress preview (was 18); raise toward PrismSpec.Context to watch longer reproductions
                     string prompt = "", want = "";
                     if (name == "text")
                     {
                         var wctx = corpus.GetExample(rng.NextInt64(Math.Max(1, corpus.Count))).Ctx;
-                        var split = Math.Max(1, wctx.Length - 18);
+                        var split = Math.Max(1, wctx.Length - preview);
                         prompt = _v.Decode(wctx[..split]); want = Clean(_v.Decode(wctx[split..]));   // "want" = the real next chars that follow the window
                     }
                     // KEEP the prompt RAW (newlines + trailing "prism: " priming intact) — the model trained on this exact
@@ -195,7 +214,7 @@ public sealed class StudioModel
                     {
                         var gen = prompt.EndsWith(" ") ? prompt : prompt + " ";   // SAME trailing-space priming PairSource trains with — so the sample sees what the model REALLY does (matches chat/serve), not an off-distribution prompt
                         genBusy = true; string pr = prompt, gp = gen, wnt = want, nm = name;
-                        Task.Run(() => { try { log($"[{nm}·{pr.Length}c ctx] {Clean(Tail(pr))} ▸ \"{Clean(GenAnswer(gp, 18))}\"  (want \"{wnt}\")"); } catch { } finally { genBusy = false; } });
+                        Task.Run(() => { try { log($"[{nm}·{pr.Length}c ctx] {Clean(Tail(pr))} ▸ \"{Clean(GenAnswer(gp, preview))}\"  (want \"{wnt}\")"); } catch { } finally { genBusy = false; } });
                     }
                 }
             }

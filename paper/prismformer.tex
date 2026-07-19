@@ -1,6 +1,7 @@
 % A Self-Replicating Swarm of Tiny AIs (PrismFormer) -- LaTeX edition.
 % Companion to paper/prismformer.md; identical content, math typeset properly.
-% Build: pdflatex prismformer.tex  (no bibtex; references are a manual author-year list).
+% Build: pdflatex -> biber -> pdflatex -> pdflatex  (biblatex; references live in prismformer.bib).
+% On Overleaf: set the compiler to pdfLaTeX and it runs biber automatically.
 \documentclass[11pt]{article}
 
 \usepackage[T1]{fontenc}
@@ -12,6 +13,9 @@
 \usepackage{array}
 \usepackage{microtype}
 \usepackage[hidelinks]{hyperref}
+\usepackage{csquotes}
+\usepackage[backend=biber,style=authoryear,sorting=nyt]{biblatex}
+\addbibresource{prismformer.bib}
 
 \DeclareMathOperator{\softmax}{softmax}
 \DeclareMathOperator*{\argmax}{arg\,max}
@@ -44,7 +48,7 @@ Transformers (PrismFormer) with Arithmetic as Algebra and Bit-Exact, Mergeable G
 \begin{center}
 \small\itshape
 The exact source, benchmarks, and runnable verification kit that produce every number below are
-archived as a frozen snapshot alongside this document (repository tag \texttt{paper-v1}); every
+archived as a frozen snapshot alongside this document (repository tag \texttt{paper-v2}); every
 quantitative result is produced by a script in that snapshot and reproducible with the command given
 in its section.
 \end{center}
@@ -56,14 +60,16 @@ operation, per-component complex multiplication (``binding''). Numbers are encod
 performs \emph{arithmetic}: addition on a linear-phase band, multiplication on a log-phase band, with
 results read back by correlation, so a computed value is \emph{decodable} rather than merely reachable.
 This numeric representation is a direct application of the frequency-domain (phasor) form of
-\textbf{Holographic Reduced Representations} [Plate 1995; 2003] and of \textbf{Random Fourier Features}
-[Rahimi \& Recht 2007]; my contribution is to make it the trainable substrate of a transformer whose
+\textbf{Holographic Reduced Representations} \parencite{plate1995hrr,plate2003hrr} and of \textbf{Random Fourier Features}
+\parencite{rahimi2007random}; my contribution is to make it the trainable substrate of a transformer whose
 dense maps are replaced by parameter-lean \textbf{relation-banks}. Because that substrate can be
 evaluated read-only during backpropagation, gradients accumulate into a detached buffer: a minibatch
 split into shards and summed is \textbf{bit-for-bit identical} to the serial result, which enables a
 \textbf{full-replication training swarm}, in which every node holds the whole model on a plain CPU,
 that stays mathematically coherent across mismatched hardware, unlike sharded systems that need matched
-accelerators.
+accelerators. Skill spreads across that swarm without a coordinator: independently-initialised nodes
+share what they have learned through continuous weight coupling, and the shared codec makes that sharing
+near-lossless ($99\%$ versus $75\%$ cross-init skill transfer).
 
 I report results honestly and reproducibly, against a parameter-matched dense transformer at each
 setting. Arithmetic emerges from the codec with \textbf{no training} (binding two number faces decodes
@@ -80,8 +86,8 @@ any single operation generalise (with one task in isolation, an unfrozen identit
 under realistic \textbf{shared multi-task load} freezing wins the held-out comparison, because the
 identity is a residual every task shares, and drifting it to fit one operation corrupts the rest. So
 freezing buys both legibility and shared-corpus generalisation, and I say exactly when each holds.
-Out-of-range extrapolation, relational reverse-inference, and large-scale convergence of the full
-colony remain open.
+Out-of-range extrapolation and large-scale convergence of the full colony remain open; reverse
+inference, $0\%$ for the closed-book trained model, is recovered by a scratchpad or an algebraic encoding.
 \end{abstract}
 
 \section{Introduction}
@@ -90,29 +96,65 @@ I should say up front what this is and where it came from, because the path is w
 I am not a machine-learning researcher. I am a full-stack developer with a background in computer
 networking, and this started as a stubborn question rather than a gap in a literature I did not yet
 know: if you wanted a model to \emph{reason} instead of recall, what would you actually have to
-represent, and how?
+represent, and how? The only instrument I had for that question was my own mind, so I used it as the
+template, and tried as rigorously as I could to watch how I actually reason and ask what structure that
+would demand.
 
-I began from a few axioms and a picture. The picture was a kind of Platonic space: somewhere concepts
-sit at definite addresses and the relationships between them are moves you can make, so that reasoning
-is navigation under rules rather than lookup. The axioms were small. A concept should have a stable
-address. Combining two concepts should be one well-defined operation, not a learned table. And the
-result of that operation should be something you can \emph{read back out}, not just something the
-network happens to be able to reach. I wanted the structure to carry the reasoning, and the network
-only to learn which moves to make.
+I did not start from the literature. I started from a short list of axioms that are frankly philosophy,
+not engineering, and I would rather say that plainly than dress it up: that consciousness is the one
+thing you cannot doubt without using it, that reasoning has to be free of contradiction, and that the
+act of observation \emph{generates} distinctions, each new distinction opening a dimension, so that the
+space of concepts only ever grows and never collapses. I do not defend any of that here, and the paper
+does not rest on it. I mention it because it is the true starting point, and because it put a very
+specific picture in my head.
 
-Every time I worked out what such a representation would have to be, I landed on the same shape: a
-\emph{codec}. A fixed, deterministic way to write any concept, word or number, down as a vector, chosen
-so that one operation composes two of them and correlation reads the answer back. As I refined the
-codec, the encoding that fell out was phasors: each concept a bundle of unit complex numbers, composed
-by complex multiplication. Write numbers as phases and they \emph{add} on one band and \emph{multiply}
-on another, so arithmetic comes out of the very same bind that composes words. That was the moment it
-felt real. I had not taught it to add; the representation just did.
+The picture was a \emph{Platonic space}, and I want to be careful with the credit, because the idea is
+ancient, it is Plato's, and Michael Levin, whose talks are where I met it, is himself explicit that he
+did not invent it. What I took from Levin's framing, his conversation with Lex Fridman and his own
+writing \parencite{levin2025lex,levin_platonic_blog}, is the operational version: a structured,
+non-physical space of patterns, the properties of mathematical objects among them, that \emph{in-forms}
+the physical world rather than emerging from it, with a mind acting as an \emph{interface} onto that
+space rather than a thing that manufactures it. I do not need any of that to be literally true. I needed
+one thing from it: that a concept can have a definite, deterministic address, the way the number five,
+or a particular word, has exactly one place it belongs, so that reasoning becomes moving between
+addresses under rules rather than lookup in a table. That is the whole of what I borrowed.
+
+The intuition that fixed this for me is an old one: do we all see red as the same colour? The Platonic
+framing answers yes, not because anyone's private experience is provably identical to anyone else's, but
+because \emph{red} is a defined point in the space and each of us is pointing at the same one. I do not
+claim to have settled that for human minds. I claim only that I built a system where it is true by
+construction: in the codec, \emph{red}, or \emph{five}, or any token, resolves to one deterministic
+address, so every copy of the model agrees on where it lives. That agreement is not decoration. It is
+exactly what later lets a swarm of separate machines merge into one coherent model, because they are all
+writing to the same coordinates.
+
+Then I did the engineer's kind of research rather than the scientist's: I built the thing, tested it,
+and mostly watched it fail, for about a year and across three separate systems. The first was pure
+geometry with no neural network at all, concepts as positions and operations as fixed moves between
+them. The second bolted a small learned \emph{navigator} onto that space. This paper is the third, where
+the space is folded into the transformer itself.\footnote{The two earlier iterations are public:
+\texttt{genesis-repl} (the pure-geometry substrate) and \texttt{genesis-nova} (substrate plus
+navigator), both under \url{https://github.com/EvaluatedApplications}.} I wrote tests for every idea so I
+could tell a real effect from wishful thinking, which is the scientific method even when what you are
+after is a working artefact and not a theorem. It was Edison's thousand dead lightbulbs, not a
+derivation. And when I looked back at what had survived all three iterations unchanged, it was always
+one property: a \emph{homomorphism}. The setups that worked were the ones where combining two
+representations mirrored combining the two things they stood for, the same structure going in and coming
+out. So I kept only that and threw the rest away.
+
+Keeping only that property is what forced the shape the rest of this paper is about: a \emph{codec}, a
+fixed and deterministic way to write any concept, word or number, as a vector, chosen so that one
+operation composes two of them and correlation reads the answer back. The encoding that fell out was
+phasors: each concept a bundle of unit complex numbers, composed by complex multiplication. Write
+numbers as phases and they \emph{add} on one band and \emph{multiply} on another, so arithmetic falls
+out of the very same bind that composes words. That was the moment it felt real. I had not taught it to
+add; the representation just did.
 
 Only afterwards did I find that the mathematics I had backed into is decades old. Representing concepts
 as unit-magnitude phasors and binding them by complex multiplication is the frequency-domain form of
-Plate's Holographic Reduced Representations [Plate 1994; 1995; 2003], later called FHRR in the Vector
-Symbolic Architectures literature [Gayler 2003; Kanerva 2009]; writing a scalar as phases of random
-frequencies and reading it back by correlation is a Random Fourier Feature map [Rahimi \& Recht 2007].
+Plate's Holographic Reduced Representations \parencite{plate1994thesis,plate1995hrr,plate2003hrr}, later called FHRR in the Vector
+Symbolic Architectures literature \parencite{gayler2003vsa,kanerva2009hdc}; writing a scalar as phases of random
+frequencies and reading it back by correlation is a Random Fourier Feature map \parencite{rahimi2007random}.
 I cite that work in full in Section~\ref{sec:related} and claim none of it as mine. What I did was
 reach it from the reasoning-space side instead of the kernel or VSA side, and then take it somewhere it
 had not gone: make the phasor codec the trainable substrate of a transformer, and build around it the
@@ -126,13 +168,13 @@ networking property before it is a learning one: a slow node's contribution and 
 into exactly the same bits, so a swarm of mismatched, unreliable CPUs can train one coherent model with
 no parameter server and no matched hardware, every node holding the whole model the way every piece of
 a hologram still holds the whole image. (That holographic picture of memory has a long history as a
-\emph{metaphor} for the brain, in Pribram's holonomic theory [Pribram 1971; 1991]; I use it only as a
+\emph{metaphor} for the brain, in Pribram's holonomic theory \parencite{pribram1971languages,pribram1991brain}; I use it only as a
 metaphor and lean on the mathematics of HRR, not on any neuroscience claim.)
 
 For context on why numbers are worth this trouble: language models handle them unevenly. Standard
 embeddings capture magnitude only partly, and that fidelity falls off with sub-word tokenization and
-past modest magnitudes [Wallace et al. 2019], while numbers rarely get any special representational
-treatment [Thawani et al. 2021]. Embedded as points along shared directions, two different magnitudes
+past modest magnitudes \parencite{wallace2019numeracy}, while numbers rarely get any special representational
+treatment \parencite{thawani2021numbers}. Embedded as points along shared directions, two different magnitudes
 look nearly collinear to a dot-product readout, so the model recalls a memorised answer instead of
 computing a new one. The codec is a direct answer to that: a computed value is decodable, not merely
 reachable.
@@ -148,10 +190,13 @@ costing $S\cdot d$ parameters instead of $d^2$.
 \item \textbf{Exactly-mergeable gradients (Section~\ref{sec:merge}).} The substrate is read-only during
 backprop, so a minibatch splits into independent shards whose summed gradients equal the serial result
 \emph{bit for bit}. I verify this to the bit.
-\item \textbf{A full-replication CPU swarm (Section~\ref{sec:merge}).} Because every node holds the
-whole model and gradients merge exactly, a swarm of mismatched CPUs trains one coherent model. It is
-the opposite design to sharded systems such as Petals [Borzunov et al. 2023], which split one model
-across matched accelerators and lose it if a peer drops.
+\item \textbf{A full-replication CPU swarm that shares skill (Sections~\ref{sec:merge}
+and~\ref{sec:skillshare}).} Because every node holds the whole model and gradients merge exactly, a swarm
+of mismatched CPUs trains one coherent model, the opposite design to sharded systems such as Petals
+\parencite{borzunov2023petals}, which split one model across matched accelerators and lose it if a peer
+drops. And skill spreads without a coordinator: independently-initialised nodes share what they have
+learned through continuous weight coupling, near-losslessly when they share the codec's coordinate system
+($99\%$ versus $75\%$).
 \end{enumerate}
 
 I try to be honest about scope, and I ablate my own design choices both ways: an ablation
@@ -164,43 +209,40 @@ to have solved.
 \section{Related work and attribution}\label{sec:related}
 
 I build directly on prior inventions and cite them plainly; the novelty here is in their combination
-and in the systems consequence, not in the primitives. In one line, an AlgFormer is the transformer
-block [Vaswani et al. 2017] with three parts swapped in: \textbf{FHRR phasor binding} [Plate 1994;
-2003] as the compose operator, a \textbf{Random Fourier Feature} scalar code [Rahimi \& Recht 2007] as
-the number embedding, and \textbf{banded circular operators} [Cheng et al. 2015; Sindhwani et al. 2015]
-in place of every dense matrix, trained by data-parallel SGD [McMahan et al. 2017] made bit-exact. The
+and in the systems consequence, not in the primitives. PrismFormer's core architecture, which I call an \textbf{AlgFormer} (an
+\emph{algebraic} transformer), is in one line the transformer
+block \parencite{vaswani2017attention} with three parts swapped in: \textbf{FHRR phasor binding} \parencite{plate1994thesis,plate2003hrr} as the compose operator, a \textbf{Random Fourier Feature} scalar code \parencite{rahimi2007random} as
+the number embedding, and \textbf{banded circular operators} \parencite{cheng2015circulant,sindhwani2015structured}
+in place of every dense matrix, trained by data-parallel SGD \parencite{mcmahan2017fedavg} made bit-exact. The
 rest of this section credits each part; Section~\ref{sec:method} shows how they compose into a whole
 model.
 
-\textbf{Binding and holographic representations.} Tensor-product binding [Smolensky 1990] and
-Holographic Reduced Representations [Plate 1995] introduced fixed-width distributed representations of
+\textbf{Binding and holographic representations.} Tensor-product binding \parencite{smolensky1990tensor} and
+Holographic Reduced Representations \parencite{plate1995hrr} introduced fixed-width distributed representations of
 structure with a circular-convolution bind and a correlation unbind. The frequency-domain form (Plate's
-``unitary vectors'' [Plate 1994; 2003], later named FHRR in the VSA literature) uses unit-magnitude
+``unitary vectors'' \parencite{plate1994thesis,plate2003hrr}, later named FHRR in the VSA literature) uses unit-magnitude
 \textbf{phasors} bound by element-wise complex multiplication, the exact bind I use. Vector Symbolic
-Architectures [Gayler 2003] and Hyperdimensional Computing [Kanerva 2009], surveyed by Kleyko et al.
-[2022; 2023], generalise this family. My phasor codec is an instance of this frequency-domain HRR; I do
+Architectures \parencite{gayler2003vsa} and Hyperdimensional Computing \parencite{kanerva2009hdc}, surveyed by \textcite{kleyko2022vsa1,kleyko2023vsa2}, generalise this family. My phasor codec is an instance of this frequency-domain HRR; I do
 not claim to have invented phasor binding.
 
 \textbf{Encoding scalars as phases.} Writing a value $v$ as $(\cos v\theta_k,\ \sin v\theta_k)$ over
-frequencies $\theta_k$ and reading it back by correlation is a Random Fourier Feature map [Rahimi \&
-Recht 2007]: the correlation approximates a kernel peaked at the true value, which is why a computed
+frequencies $\theta_k$ and reading it back by correlation is a Random Fourier Feature map \parencite{rahimi2007random}: the correlation approximates a kernel peaked at the true value, which is why a computed
 result is \emph{decodable} rather than merely reachable. Prior work characterises how numeracy is only
-partially captured by standard embeddings and where it breaks down [Wallace et al. 2019], and surveys
-the broader need for better numeric representation [Thawani et al. 2021].
+partially captured by standard embeddings and where it breaks down \parencite{wallace2019numeracy}, and surveys
+the broader need for better numeric representation \parencite{thawani2021numbers}.
 
 \textbf{Parameter-efficient linear maps.} Replacing dense $W\!\cdot\! x$ with structured operators is
-well studied: circulant projections [Cheng et al. 2015] and structured transforms [Sindhwani et al.
-2015]. My relation-bank $y[i] = \sum_{k<S} \bank[k][i]\cdot x[(i+k)\bmod d]$ is a sum of $S$
+well studied: circulant projections \parencite{cheng2015circulant} and structured transforms \parencite{sindhwani2015structured}. My relation-bank $y[i] = \sum_{k<S} \bank[k][i]\cdot x[(i+k)\bmod d]$ is a sum of $S$
 diagonally-scaled cyclic shifts (a ``banded'' family over the cyclic group $\mathbb{Z}/d\mathbb{Z}$);
 at $S=d$ it reparametrises a full matrix, so $S$ is a lean-to-full-rank control.
 
 \textbf{Architecture and optimisation.} The block structure (attention, then per-token feed-forward,
-with residuals) follows the transformer [Vaswani et al. 2017]; I train with Adam [Kingma \& Ba 2015].
+with residuals) follows the transformer \parencite{vaswani2017attention}; I train with Adam \parencite{kingma2015adam}.
 
 \textbf{Distributed and decentralised training.} Data-parallel synchronous SGD sums gradients across
 workers; my exact-merge is that identity made bit-exact on a CPU substrate. Weight-slice averaging
-between peers is a form of elastic/federated averaging [McMahan et al. 2017]. In contrast to
-model-parallel collaborative inference [Borzunov et al. 2023], every PrismFormer node replicates the
+between peers is a form of elastic/federated averaging \parencite{mcmahan2017fedavg}. In contrast to
+model-parallel collaborative inference \parencite{borzunov2023petals}, every PrismFormer node replicates the
 whole model, so no peer is load-bearing.
 
 \section{Method}\label{sec:method}
@@ -247,8 +289,7 @@ $e^{i \ln v\,\theta_k}\, e^{i \ln w\,\theta_k} = e^{i \ln(vw)\,\theta_k}$, the n
 One bind therefore computes a sum on one band and a product on the other at the same time. The value is
 read back by correlation against the codebook:
 $\mathrm{DecodeSum}(h) = \argmax_c \langle \face{c}, h\rangle$ over the linear band, and
-$\mathrm{DecodeProduct}$ the same over the log band. As a Random Fourier Feature map [Rahimi \& Recht
-2007], that correlation is a kernel peaked at the true value, so a \emph{computed} result is nameable,
+$\mathrm{DecodeProduct}$ the same over the log band. As a Random Fourier Feature map \parencite{rahimi2007random}, that correlation is a kernel peaked at the true value, so a \emph{computed} result is nameable,
 not merely reachable: there is no table and no arithmetic unit, only a phase pattern named by
 correlation.
 
@@ -257,8 +298,7 @@ deterministic phasor \textbf{signature} on the identity band and a \textbf{seed}
 Numbers and symbols thus share one space and one algebra; the only difference is that a number's
 \emph{value} becomes phase while a symbol's \emph{spelling} does. The identity band (value or signature)
 is a concept's ground truth and is \textbf{frozen}; the orbital tail is what training moves. This is
-exactly the frequency-domain HRR of Plate [1994; 2003] with an RFF scalar encoding [Rahimi \& Recht
-2007]; the contribution (Section~\ref{sec:algformer}) is to make it a trainable transformer substrate.
+exactly the frequency-domain HRR of \textcite{plate1994thesis,plate2003hrr} with an RFF scalar encoding \parencite{rahimi2007random}; the contribution (Section~\ref{sec:algformer}) is to make it a trainable transformer substrate.
 
 \emph{Verifiable now, no training:} $\bind\!\big(\face{6}, \face{9}\big)$ decodes to $15$ (linear band)
 and $54$ (log band). Over all single-digit pairs the codec is exact: $\mathbf{100/100}$ sums (0--9) and
@@ -266,7 +306,7 @@ $\mathbf{81/81}$ products (1--9). Run \code{dotnet run --project verify/Verify -
 
 \subsection{The relation-bank transformer (AlgFormer)}\label{sec:algformer}
 
-AlgFormer keeps the transformer block shape [Vaswani et al. 2017] and changes two things: every
+AlgFormer keeps the transformer block shape \parencite{vaswani2017attention} and changes two things: every
 activation is a face, and every dense linear map $W\!\cdot\! x$ (a $d\times d$ matrix, $d^2$ parameters)
 becomes a \textbf{relation-bank} of $S$ faces ($S\cdot d$ parameters):
 \begin{equation}
@@ -307,8 +347,8 @@ pass is hand-derived and finite-difference gradient-checked at production dimens
 SIMD-vectorised over the output index (\code{System.Numerics.Vector<double>}), bit-identical to the
 scalar form.
 
-Each face separates a fixed \textbf{identity} region (the numeric value / symbol signature, the first
-$\mathrm{FrozenReals}$ reals) from a learnable \textbf{orbital} tail. My implementation \emph{freezes}
+Each face separates a fixed \textbf{identity} region (the numeric value / symbol signature, a fixed-size
+prefix of each face's reals) from a learnable \textbf{orbital} tail. My implementation \emph{freezes}
 the identity region during training. I treat this as a design choice and test it both ways
 (Section~\ref{sec:worked}): freezing does \textbf{not} improve generalisation on a single operation in
 isolation (an unfrozen, still codec-seeded identity does better there), but it \textbf{wins} under
@@ -341,7 +381,7 @@ parameter server. (Freezing is one clearing of the identity-band gradient before
 numbers never drift.)
 
 This is what the swarm is built on. Every node holds the whole model (full replication), trains on its
-own data, and contributes gradient buffers (or averaged weight slices [McMahan et al. 2017]) that merge
+own data, and contributes gradient buffers (or averaged weight slices \parencite{mcmahan2017fedavg}) that merge
 without a coordinator. Because a slow CPU's buffer and a fast CPU's buffer combine into the same bits, a
 colony of mismatched, unreliable machines stays one coherent model, and a new node joins simply by
 receiving the model and, from then on, replicating and spreading it. That is the sense in which the
@@ -370,6 +410,9 @@ experiment (command) & PrismFormer & transformer & seeds $\times$ budget & data 
 \S\,4.4 mechanistic (\code{--inspect}) & 177{,}421 & 169{,}213 & $8\times6$k steps & single-digit, $\sim$20\% held \\
 \S\,4.5 language (\code{--lm}) & 249{,}920 & 259{,}776 & $5\times30$ ep & 1{,}670-char corpus \\
 \S\,4.6 exact-merge (\code{verify/Verify}) & \code{Mini} & --- & deterministic & --- \\
+\S\,4.7 codec-seed control (\code{--codec-baseline}) & 241{,}696 & 804{,}896 & $5\times800$ ep & add/sub 0--12, $\sim$20\% held \\
+\S\,4.8 skill-sharing (\code{--average}) & \code{Mini} & --- & elastic coupling & add 0--12, cross-init \\
+\S\,4.9 reverse inference (\code{--revinfer}) & \code{Mini} / algebra & --- & 3 arms & 24 symmetric pairs \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -396,12 +439,16 @@ parity       & $77\%$ / $53\% \pm 14\%$ & $100\%$ / $\mathbf{68\% \pm 11\%}$ \\
 \end{center}
 
 The transformer \textbf{fits its training data} ($85.8\%$ mean train accuracy on these tasks) and
-\textbf{ties} PrismFormer at $100\%$ on copy, so the comparison is fair. On the relational tasks
+\textbf{ties} PrismFormer at $100\%$ on copy, so the comparison is fair. Across the \textbf{seven} fair tasks (the five above plus \emph{antonym} and \emph{capital})
 PrismFormer generalises markedly better: $\mathbf{65.9\%}$ vs $\mathbf{49.1\%}$ held-out, averaged over
-tasks and seeds. Two honest caveats. \emph{Reverse-inference} (training ``opposite of A = B'' or
-``capital of C = city'' and holding out the reverse direction) is \textbf{0\% for both models} at this
-scale (neither infers the symmetric relation); I keep it out of the summary and list it as a limitation
-(Section~\ref{sec:lim}). And single-token arithmetic (add/sub/mul/div where the whole answer is one
+tasks and seeds. Two honest caveats. The two fair tasks not shown, antonym and capital, are tested only
+in the held-out \emph{reverse} direction (train ``opposite of A = B'', hold out ``opposite of B = A'';
+train ``capital of C = city'', hold out the inverse), and there \textbf{both models score
+$\approx 0\%$}: neither infers the symmetric relation at this scale. Those two zeros are \emph{included}
+in the $65.9$/$49.1$ mean, which is why it sits below the individual relation accuracies above. I flag
+this \emph{reverse-inference} as a limitation (Section~\ref{sec:lim}) rather than dropping it from the
+average, though the codec's own machinery recovers it with a scratchpad or an algebraic encoding
+(Section~\ref{sec:revinfer}). And single-token arithmetic (add/sub/mul/div where the whole answer is one
 vocab token) is \emph{representation-favoured}: the codec makes the answer face equal to
 $\bind(\text{inputs})$, so PrismFormer decodes it by construction (held-out 27--64\% vs the
 transformer's 3--21\%). That is a property of the encoding, not evidence a transformer cannot add; the
@@ -434,7 +481,9 @@ div & $\mathbf{33.2\% \pm 12.9\%}$ [43\%] & $2.0\% \pm 2.5\%$ [1\%] & 50\% \\
 \end{tabular}
 \end{center}
 
-PrismFormer computes all four; the transformer does none of them. Given the identical worked problem it
+Here \emph{face-decode} is the answer read directly off the frozen identity bands with no trained probe,
+the legibility measure quantified in Section~\ref{sec:inside}. PrismFormer computes all four; the
+transformer does none of them. Given the identical worked problem it
 sits near zero even on pairs it \emph{was} trained on (it cannot do exact multi-digit arithmetic at this
 scale), while PrismFormer answers unseen problems far better than the transformer answers ones it has
 already seen. For add/sub, held-out matches seen (55 against 58, 70 against 74): it learned the column
@@ -552,8 +601,119 @@ result. Run \code{dotnet run --project bench -c Release -- --lm}.
 Splitting a batch into $K$ shards, computing them sequentially and in parallel, and reducing in a fixed
 index order yields gradient tensors with an identical bitwise (FNV) checksum
 (\code{0x945A7A4E8E0B9F3B}), and a re-run reproduces it exactly. The \code{verify/} kit reproduces this
-in seconds; the benchmark's \code{--gradcheck} extends it to the full production spec. This is the
-property that lets a mismatched-CPU colony sum into one coherent model.
+in seconds, at the production dimensions. This is the property that lets a mismatched-CPU colony sum into
+one coherent model.
+
+\subsection{The codec-seeded baseline control}\label{sec:codecbaseline}
+
+Because PrismFormer's number embeddings are seeded from the phasor codec while the transformer baseline
+starts random, a fair reader asks whether the head-to-head gap is \emph{initialisation} rather than
+architecture. I test the confound at its source: hand the transformer the \emph{same} codec seeding and
+re-measure. Three models train on the same in-range held-out add/sub split (operands 0--12, 20\% of pairs
+held), over $5$ seeds: AlgFormer with codec-seeded embeddings; a transformer with random embeddings; and
+\emph{the same transformer with its embeddings seeded from the identical codec}, so the only difference
+from the random one is the initialisation. The transformer is given a warmup schedule so that it fits
+train, and at $\sim$805k parameters it is $3.3\times$ larger than AlgFormer's $\sim$242k.
+
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+model & params & train & held-out (mean$\pm$sd, 5 seeds) \\
+\midrule
+AlgFormer (codec-seeded)   & 242k & $100\%$ & $45.8\% \pm 15.9\%$ \\
+transformer (random init)  & 805k & $95\%$  & $31.3\% \pm 21.3\%$ \\
+transformer (codec-seeded) & 805k & $63\%$  & $\mathbf{9.1\% \pm 6.9\%}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The confound is refuted, and in the strongest way: seeding the transformer from the codec does
+\textbf{not} help it, it \textbf{hurts} it, on every one of the five seeds. Held-out falls from $31.3\%$
+to $9.1\%$, and the seeded transformer cannot even fit the training data as well ($63\%$ vs $95\%$). So
+the codec is not a transferable free head-start that inflates AlgFormer's numbers; the same phasor
+geometry that AlgFormer's bind and correlate operations are built to read is a \emph{liability} to
+attention, which cannot exploit it. I am deliberately not over-reading the rest of the table: on this
+small single-token task AlgFormer and a tuned random-init transformer are within seed-to-seed noise
+($45.8\pm15.9$ vs $31.3\pm21.3$, and the transformer wins on two of the five seeds), so the clean
+architectural separation is the one shown on the worked multi-digit and relational tasks
+(Sections~\ref{sec:worked} and~\ref{sec:relational}), not here. What this control establishes is narrower
+and cleaner: the initialisation confound does not explain the gap, because the initialisation does not
+transfer. Run \code{dotnet run --project bench -c Release -- --codec-baseline}.
+
+\subsection{Skill-sharing by continuous coupling}\label{sec:skillshare}
+
+The swarm's other half is not just that gradients \emph{merge} but that skill \emph{spreads}: a node
+should pick up what its peers have learned. I test this in a single process, simulating the mesh's weight
+coupling directly (a live multi-node run is still future work, Section~\ref{sec:lim}). The setup is the
+elastic-averaging move the mesh actually uses, a continuous pull of each node's weights toward a running
+average of its peers' \parencite{zhang2015easgd,mcmahan2017fedavg}, on a small multi-skill arithmetic
+corpus where different nodes are trained on different skills. Three findings, and I am careful about the
+boundary of each.
+
+First, \textbf{one-shot averaging of independently-trained models fails.} Train two models to competence
+and average their weights once: with a shared initialisation and the frozen codec it holds ($72\%$), but
+with \emph{different} initialisations it collapses to near-chance ($9\%$ with the codec, $6\%$ without).
+This is the linear-mode-connectivity / permutation-symmetry barrier \parencite{ainsworth2023rebasin}: two
+independently-initialised networks sit in different basins, and their midpoint is not a good model. The
+codec alone does not rescue it, because the codec pins the \emph{embedding} coordinate system, not the
+relation-bank weights.
+
+Second, \textbf{continuous coupling bridges different initialisations where one-shot averaging cannot.}
+Replace the single average with a gentle pull-to-mean applied \emph{throughout} training (elastic
+averaging): two different-init nodes now reach $\mathbf{75\%}$ without the codec and $\mathbf{99\%}$ with
+the frozen codec, while their weights stay measurably distinct (divergence $0.07$ and $0.02$). Skill
+transfers directly: a node picks up a peer's competence purely through weight coupling, with no shared
+training data.
+
+Third, the \textbf{codec is a bounded enhancer, not a magic key.} Coupling already works on a plain
+network ($75\%$); the frozen codec lifts it to near-lossless ($99\%$) by giving every node the same fixed
+coordinate system, so their updates stay commensurable instead of drifting into incompatible bases. The
+honest claim is therefore precise: continuous elastic coupling shares skill across
+independently-initialised nodes on \emph{any} network, and the algebraic codec makes that sharing
+near-lossless. It is neither ``only the codec can do this'' (a plain net reaches $75\%$) nor a new
+optimiser (elastic averaging is standard \parencite{zhang2015easgd}); it is a measured, specific benefit
+of a shared representational coordinate system. Averaging weights from a \emph{shared} initialisation is
+already known to work \parencite{wortsman2022soups}; the contribution here is that the fixed codec extends
+near-lossless sharing to nodes that never shared one. Run
+\code{dotnet run --project bench -c Release -- --average}.
+
+\subsection{Reverse inference, recovered}\label{sec:revinfer}
+
+The reverse-inference failure of Section~\ref{sec:relational} (train ``opposite of A = B'', hold out
+``opposite of B = A''; $0\%$ for both models) deserves a closer look, because the codec's own machinery
+addresses it. The right diagnosis is that the $0\%$ is a \emph{directional-recall} failure, not a
+reasoning failure: a closed-book model trained on $A\!\to\!B$ stores a directed map, and nothing in it
+says the relation runs backward. Reversing, once you have the fact, is trivial. I show this three ways on
+a set of symmetric pairs (run \code{dotnet run --project bench -c Release -- --revinfer}):
+
+\begin{center}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+ & forward & reverse (held-out) \\
+\midrule
+closed-book, trained (the setup above)         & $100\%$    & $0\%$ \\
+open-book scratchpad (fact in context)         & ---        & $\mathbf{100\%}$ \\
+algebra (commutative bind, no training), 12 / 24 pairs & $100/83\%$ & $\mathbf{100/83\%}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Scratchpad.} Provide the forward fact in context and the reverse becomes ``select the element
+that is not the query'', the same copy operation the model already does at $100\%$
+(Section~\ref{sec:relational}); it generalises to unseen pairings of seen tokens at $100\%$. This does
+not conjure a fact taught in only one direction; it removes the \emph{recall} bottleneck by making the
+fact available, which is exactly what a retrieval step or a reasoning scratchpad provides.
+
+\textbf{Algebra.} Store a symmetric relation as a \emph{commutative} bind $L \bind R$, retrieved by
+unbinding the query ($L\bind R\bind R^{-1} = L$, and the bind commutes), so forward and reverse are the
+\emph{same} operation and the reverse is free, with no training. The only shortfall from $100\%$ is HRR
+crosstalk as the associative bundle fills, a capacity property rather than an asymmetry. This is the
+arithmetic-as-algebra move of Section~\ref{sec:codec} applied to relations: the reverse falls out of the
+codec the way a sum or product does.
+
+So reverse inference is not a wall. It is $0\%$ only in the closed-book, directional-recall regime, and
+either a scratchpad (retrieval) or an algebraic encoding recovers it. I still report the closed-book
+$0\%$ as the honest number for the end-to-end trained model, and treat this as the constructive next step.
 
 \section{Limitations}\label{sec:lim}
 
@@ -566,13 +726,14 @@ digits than trained, a hard positional-generalisation problem I do not target); 
 $\times$ multi-digit multiplication, which needs a partial-product scratchpad
 (Section~\ref{sec:worked}). (ii) \textbf{Reverse-inference} (inferring a held-out symmetric/reverse
 relation from the trained direction) is \textbf{0\% for both models} at this scale
-(Section~\ref{sec:relational}). (iii) \textbf{Freezing is regime-dependent}: on a single operation in
+(Section~\ref{sec:relational}) in the closed-book, end-to-end setting; it is recoverable with a scratchpad
+(retrieval) or an algebraic commutative-bind encoding (Section~\ref{sec:revinfer}), which I treat as the
+constructive next step rather than a solved integration. (iii) \textbf{Freezing is regime-dependent}: on a single operation in
 isolation an unfrozen (still codec-seeded) identity generalises better; freezing only wins under shared
 multi-task load, and its unconditional benefit is legibility (Section~\ref{sec:worked}). I keep it as
 the headline for the shared-corpus and legibility reasons and state the isolated-task caveat. (iv)
 \textbf{Scale.} Results are at $\approx 10^5$ parameters; large-scale convergence of the full colony is
-demonstrated to \emph{run} but not yet to \emph{converge} at scale. (v) \textbf{The token economy}
-described in the repository is a design, not code. (vi) \textbf{Novelty.} The phasor codec and RFF
+demonstrated to \emph{run} but not yet to \emph{converge} at scale. (v) \textbf{Novelty.} The phasor codec and RFF
 encoding are prior art (Section~\ref{sec:related}); my contribution is their use as a trainable,
 exactly-mergeable transformer substrate and the swarm it enables.
 
@@ -581,11 +742,14 @@ exactly-mergeable transformer substrate and the swarm it enables.
 I would rather name the sharpest objections to this work than let a reader find them unaided. Each is a
 concrete next step, not a rhetorical hedge.
 
-\textbf{A codec-seeded baseline.} PrismFormer's numeric embeddings are seeded from the phasor codec,
-while the transformer baseline starts from random initialisation. That is a confound: some of the
-measured gap could be initialisation rather than architecture. The control I have not yet run is to seed
-the baseline's embeddings from the same codec and re-measure. Until that is done, the head-to-heads
-should be read as ``codec-seeded algebraic model vs standard transformer,'' not ``architecture alone.''
+\textbf{The codec-seeded baseline confound, now controlled.} PrismFormer's numeric embeddings are seeded
+from the phasor codec while the transformer baseline starts random, which could confound architecture
+with initialisation. I ran the control (Section~\ref{sec:codecbaseline}): handing the transformer the
+same codec seeding does not help it and in fact hurts it (held-out $31.3\%\to9.1\%$ over five seeds, and
+it fits train less well), so the codec is not a transferable head-start that explains the gap. What that
+control does \emph{not} settle, because this single-token task is small and high-variance, is a clean
+architecture-versus-transformer margin on it; that separation lives in the worked multi-digit and
+relational results, and a stronger baseline is discussed next.
 
 \textbf{A stronger baseline, and the right prior art.} My transformer baseline is a hand-derived,
 gradient-checked encoder without layer normalisation, matched by parameter count. It fits its training
@@ -594,11 +758,12 @@ tuned optimiser). A comparison against a well-tuned standard transformer, and ag
 complex-valued and VSA / neuro-symbolic models, which I do not yet compare to, is needed before any
 architectural claim is settled.
 
-\textbf{The swarm, actually distributed.} I show that sharded gradients merge bit-for-bit and that the
-mechanism runs, but every experiment here is single-process. A genuine multi-node run, with a
-convergence curve, a fault-injection test, and a wall-clock scaling measurement, is future work; until
-it exists, the swarm should be read as a demonstrated \emph{merge property} plus an \emph{architecture},
-not a demonstrated distributed-training result. The value of bit-exactness over ordinary asynchronous
+\textbf{The swarm, actually distributed.} I show that sharded gradients merge bit-for-bit, that the
+mechanism runs, and that skill spreads across independently-initialised nodes through continuous coupling
+(Section~\ref{sec:skillshare}), but every experiment here is single-process. A genuine multi-node run,
+with a convergence curve, a fault-injection test, and a wall-clock scaling measurement, is future work;
+until it exists, the swarm should be read as a demonstrated \emph{merge-and-share property} plus an
+\emph{architecture}, not a demonstrated distributed-training result. The value of bit-exactness over ordinary asynchronous
 approximate merging is likewise something I argue for but have not yet measured.
 
 \textbf{The homomorphism does not extrapolate, and that narrows the thesis.} Within the trained range
@@ -631,7 +796,7 @@ per-section commands are there so anyone can reproduce, or refute, each number.
 \section*{Reproducibility}
 
 The exact code that produced every number above is bundled with this archive as a frozen source
-snapshot (repository tag \texttt{paper-v1}), so it does not depend on the live repository, which
+snapshot (repository tag \texttt{paper-v2}), so it does not depend on the live repository, which
 continues to evolve. Build with the .NET 8 SDK; each command below is run from the snapshot root.
 
 \begin{itemize}
@@ -639,37 +804,29 @@ continues to evolve. Build with the .NET 8 SDK; each command below is run from t
 (\code{dotnet run --project verify/Verify -c Release}).
 \item \code{bench/}: the parameter-matched head-to-heads, the default run (Section~\ref{sec:relational}),
 plus \code{--columnar} (Section~\ref{sec:worked}, with the frozen-identity ablation), \code{--inspect}
-(Section~\ref{sec:inside}, mechanistic), \code{--lm} (\S\,4.5), \code{--gradcheck}
-(Section~\ref{sec:exactmerge}).
+(Section~\ref{sec:inside}, mechanistic), \code{--lm} (\S\,4.5), \code{--codec-baseline}
+(Section~\ref{sec:codecbaseline}), \code{--average} (Section~\ref{sec:skillshare}), and \code{--revinfer}
+(Section~\ref{sec:revinfer}).
 \item \code{PRIOR\_ART.md}: a timestamped defensive-publication disclosure of the methods.
 \end{itemize}
 
-\section*{References}
+\section*{Tool and computational resource disclosure}
 
-\begingroup
-\setlength{\parskip}{4pt}
-\setlength{\hangindent}{1.5em}
+In the spirit of the Leiden Declaration on Artificial Intelligence and Mathematics, I disclose the tools
+behind this work. The ideas, the design, and the direction are mine: the axioms and Platonic-space
+framing, the phasor codec and its homomorphism, the relation-bank transformer, and the exactly-mergeable
+swarm, together with every design decision and the choice of what to test. I used a large-language-model
+coding assistant as an \emph{execution} tool: to implement the software and benchmark suite, to run and
+tabulate experiments, and to draft and edit this manuscript to my specification and under my review. It
+carried out my instructions; it did not originate the research. Every claim, number, and argument was
+checked and verified by me, and I retain full responsibility for the correctness and adequacy of the
+results; where the evidence contradicted one of my own hypotheses, I report the contradiction
+(Section~\ref{sec:worked}). No claim here rests on an unverified automated argument: every quantitative
+result is produced by the reproducibility kit (frozen snapshot, tag \texttt{paper-v2}) and can be re-run
+or refuted independently. All experiments ran on commodity CPUs; no result depends on specialised
+accelerators.
 
-Borzunov, A., Baranchuk, D., Dettmers, T., et al. (2023). \emph{Petals: Collaborative Inference and Fine-tuning of Large Models.} ACL 2023 (System Demonstrations), pp.~558--568.\par
-Cheng, Y., Yu, F.~X., Feris, R.~S., Kumar, S., Choudhary, A., \& Chang, S.-F. (2015). \emph{An Exploration of Parameter Redundancy in Deep Networks with Circulant Projections.} ICCV, pp.~2857--2865.\par
-Gayler, R.~W. (2003). \emph{Vector Symbolic Architectures answer Jackendoff's challenges for cognitive neuroscience.} Proc.\ Joint Int.\ Conf.\ on Cognitive Science (ICCS/ASCS), Sydney, pp.~133--138.\par
-Kanerva, P. (2009). \emph{Hyperdimensional Computing: An Introduction to Computing in Distributed Representation with High-Dimensional Random Vectors.} Cognitive Computation, 1(2), 139--159.\par
-Kingma, D.~P., \& Ba, J. (2015). \emph{Adam: A Method for Stochastic Optimization.} ICLR.\par
-Kleyko, D., Rachkovskij, D.~A., Osipov, E., \& Rahimi, A. (2022). \emph{A Survey on Hyperdimensional Computing aka Vector Symbolic Architectures, Part I: Models and Data Transformations.} ACM Computing Surveys, 55(6), Art.~130. (arXiv:2111.06077)\par
-Kleyko, D., Rachkovskij, D.~A., Osipov, E., \& Rahimi, A. (2023). \emph{A Survey on Hyperdimensional Computing aka Vector Symbolic Architectures, Part II: Applications, Cognitive Models, and Challenges.} ACM Computing Surveys, 55(9), Art.~175. (arXiv:2112.15424)\par
-McMahan, B., Moore, E., Ramage, D., Hampson, S., \& Arcas, B.~A. (2017). \emph{Communication-Efficient Learning of Deep Networks from Decentralized Data (FedAvg).} AISTATS, PMLR 54:1273--1282.\par
-Plate, T.~A. (1994). \emph{Distributed Representations and Nested Compositional Structure.} PhD thesis, University of Toronto. (Origin of the unitary / frequency-domain HRR construction.)\par
-Plate, T.~A. (1995). \emph{Holographic Reduced Representations.} IEEE Transactions on Neural Networks, 6(3), 623--641.\par
-Plate, T.~A. (2003). \emph{Holographic Reduced Representation: Distributed Representation for Cognitive Structures.} CSLI Publications, CSLI Lecture Notes 150. (Frequency-domain / ``unitary vector'' phasor HRR; the name ``FHRR'' is a later coinage in the VSA literature.)\par
-Pribram, K.~H. (1971). \emph{Languages of the Brain: Experimental Paradoxes and Principles in Neuropsychology.} Prentice-Hall. (Holographic-memory hypothesis; cited here as metaphor only.)\par
-Pribram, K.~H. (1991). \emph{Brain and Perception: Holonomy and Structure in Figural Processing.} Lawrence Erlbaum Associates. (The developed holonomic-brain theory; a contested hypothesis, not relied upon.)\par
-Rahimi, A., \& Recht, B. (2007). \emph{Random Features for Large-Scale Kernel Machines.} NeurIPS (NIPS), pp.~1177--1184.\par
-Sindhwani, V., Sainath, T.~N., \& Kumar, S. (2015). \emph{Structured Transforms for Small-Footprint Deep Learning.} NeurIPS (NIPS).\par
-Smolensky, P. (1990). \emph{Tensor Product Variable Binding and the Representation of Symbolic Structures in Connectionist Systems.} Artificial Intelligence, 46(1--2), 159--216.\par
-Thawani, A., Pujara, J., Ilievski, F., \& Szekely, P. (2021). \emph{Representing Numbers in NLP: a Survey and a Vision.} NAACL-HLT, pp.~644--656.\par
-Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L., Gomez, A.~N., Kaiser, {\L}., \& Polosukhin, I. (2017). \emph{Attention Is All You Need.} NeurIPS (NIPS), pp.~5998--6008.\par
-Wallace, E., Wang, Y., Li, S., Singh, S., \& Gardner, M. (2019). \emph{Do NLP Models Know Numbers? Probing Numeracy in Embeddings.} EMNLP-IJCNLP, pp.~5307--5315.\par
-\endgroup
+\printbibliography[title={References}]
 
 \vspace{1em}
 \emph{Please open an issue if any attribution is incomplete or mis-stated; correct credit to prior work
