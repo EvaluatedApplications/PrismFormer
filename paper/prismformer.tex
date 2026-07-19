@@ -1,4 +1,4 @@
-% A Self-Replicating Swarm of Tiny AIs (PrismFormer) -- LaTeX edition.
+% Phasor-Face Transformers (PrismFormer) -- LaTeX edition.
 % Companion to paper/prismformer.md; identical content, math typeset properly.
 % Build: pdflatex -> biber -> pdflatex -> pdflatex  (biblatex; references live in prismformer.bib).
 % On Overleaf: set the compiler to pdfLaTeX and it runs biber automatically.
@@ -28,9 +28,8 @@
 \setlength{\parindent}{0pt}
 \setlength{\parskip}{0.6em}
 
-\title{\textbf{A Self-Replicating Swarm of Tiny AIs}\\[0.3em]
-\large\normalfont\itshape Phasor-face transformers (PrismFormer): arithmetic as algebra,
-and bit-exact, mergeable gradients on plain CPUs.}
+\title{\textbf{Phasor-Face Transformers: Decodable, Generalising Arithmetic in a Small Transformer}\\[0.3em]
+\large\normalfont\itshape PrismFormer: arithmetic as algebra, with bit-exact, mergeable gradients on plain CPUs.}
 \author{\textbf{Dongyang Stephen Chen}\\ Evaluated Applications\\
 \small\texttt{dongyang.stephen.chen@gmail.com}}
 \date{Draft, 2026}
@@ -40,15 +39,15 @@ and bit-exact, mergeable gradients on plain CPUs.}
 
 \begin{center}
 \textbf{DOI:} \href{https://doi.org/10.5281/zenodo.21384525}{10.5281/zenodo.21384525}\\[0.3em]
-\small Cite as: Chen, D.\,S. (2026). \emph{A Self-Replicating Swarm of Tiny AIs: Phasor-Face
-Transformers (PrismFormer) with Arithmetic as Algebra and Bit-Exact, Mergeable Gradients.} Zenodo.
+\small Cite as: Chen, D.\,S. (2026). \emph{Phasor-Face Transformers (PrismFormer): Decodable,
+Generalising Arithmetic in a Small Transformer, with Bit-Exact, Mergeable Gradients.} Zenodo.
 \href{https://doi.org/10.5281/zenodo.21384525}{https://doi.org/10.5281/zenodo.21384525}
 \end{center}
 
 \begin{center}
 \small\itshape
 The exact source, benchmarks, and runnable verification kit that produce every number below are
-archived as a frozen snapshot alongside this document (repository tag \texttt{paper-v2}); every
+archived as a frozen snapshot alongside this document (repository tag \texttt{paper-v3}); every
 quantitative result is produced by a script in that snapshot and reproducible with the command given
 in its section.
 \end{center}
@@ -64,12 +63,16 @@ This numeric representation is a direct application of the frequency-domain (pha
 \parencite{rahimi2007random}; my contribution is to make it the trainable substrate of a transformer whose
 dense maps are replaced by parameter-lean \textbf{relation-banks}. Because that substrate can be
 evaluated read-only during backpropagation, gradients accumulate into a detached buffer: a minibatch
-split into shards and summed is \textbf{bit-for-bit identical} to the serial result, which enables a
-\textbf{full-replication training swarm}, in which every node holds the whole model on a plain CPU,
-that stays mathematically coherent across mismatched hardware, unlike sharded systems that need matched
-accelerators. Skill spreads across that swarm without a coordinator: independently-initialised nodes
-share what they have learned through continuous weight coupling, and the shared codec makes that sharing
-near-lossless ($99\%$ versus $75\%$ cross-init skill transfer).
+split into shards and summed is \textbf{bit-for-bit identical} to the serial result. I verify that merge
+property to the bit, and it is what a \textbf{full-replication training swarm} would be built on, every
+node holding the whole model on a plain CPU and staying mathematically coherent across mismatched
+hardware, unlike sharded systems that need matched accelerators. I am careful about what I have and have
+not shown: the exact merge is a \emph{proven property} and the swarm is the \emph{architecture} it
+enables and a direction I argue for, \textbf{not} yet a demonstrated distributed-training run, since every
+experiment here is single-process. In that single-process setting I do show skill spreading without a
+coordinator: independently-initialised nodes share what they have learned through continuous weight
+coupling, and the shared codec makes that sharing near-lossless ($99\%$ versus $75\%$ cross-init skill
+transfer).
 
 I report results honestly and reproducibly, against a parameter-matched dense transformer at each
 setting. Arithmetic emerges from the codec with \textbf{no training} (binding two number faces decodes
@@ -165,9 +168,11 @@ the paper. Because the substrate is only read, never mutated, while gradients pi
 buffer, a batch split across shards and summed lands on a result that is \emph{bit-for-bit identical}
 to running it on one machine (Sections~\ref{sec:merge} and~\ref{sec:exactmerge}). Bit-exactness is a
 networking property before it is a learning one: a slow node's contribution and a fast node's combine
-into exactly the same bits, so a swarm of mismatched, unreliable CPUs can train one coherent model with
-no parameter server and no matched hardware, every node holding the whole model the way every piece of
-a hologram still holds the whole image. (That holographic picture of memory has a long history as a
+into exactly the same bits, so a swarm of mismatched, unreliable CPUs \emph{could} train one coherent
+model with no parameter server and no matched hardware, every node holding the whole model the way every
+piece of a hologram still holds the whole image. I want to be clear that this is the architecture the
+merge property enables, and that I demonstrate the property and simulate the coupling in a single process
+here, not a live multi-node run. (That holographic picture of memory has a long history as a
 \emph{metaphor} for the brain, in Pribram's holonomic theory \parencite{pribram1971languages,pribram1991brain}; I use it only as a
 metaphor and lean on the mathematics of HRR, not on any neuroscience claim.)
 
@@ -190,13 +195,16 @@ costing $S\cdot d$ parameters instead of $d^2$.
 \item \textbf{Exactly-mergeable gradients (Section~\ref{sec:merge}).} The substrate is read-only during
 backprop, so a minibatch splits into independent shards whose summed gradients equal the serial result
 \emph{bit for bit}. I verify this to the bit.
-\item \textbf{A full-replication CPU swarm that shares skill (Sections~\ref{sec:merge}
-and~\ref{sec:skillshare}).} Because every node holds the whole model and gradients merge exactly, a swarm
-of mismatched CPUs trains one coherent model, the opposite design to sharded systems such as Petals
-\parencite{borzunov2023petals}, which split one model across matched accelerators and lose it if a peer
-drops. And skill spreads without a coordinator: independently-initialised nodes share what they have
-learned through continuous weight coupling, near-losslessly when they share the codec's coordinate system
-($99\%$ versus $75\%$).
+\item \textbf{The architecture this enables: a full-replication CPU swarm that shares skill
+(Sections~\ref{sec:merge} and~\ref{sec:skillshare}).} Because every node would hold the whole model and
+gradients merge exactly, such a swarm \emph{could} train one coherent model on mismatched CPUs, the
+opposite design to sharded systems such as Petals \parencite{borzunov2023petals}, which split one model
+across matched accelerators and lose it if a peer drops. And skill spreads without a coordinator: in a
+single process that simulates the mesh coupling I show independently-initialised nodes sharing what they
+have learned through continuous weight coupling, near-losslessly when they share the codec's coordinate
+system ($99\%$ versus $75\%$). Every experiment here is single-process, so I present this as a proven
+merge-and-share property plus the architecture it enables, and flag the live multi-node run as future
+work (Section~\ref{sec:lim}).
 \end{enumerate}
 
 I try to be honest about scope, and I ablate my own design choices both ways: an ablation
@@ -230,6 +238,40 @@ frequencies $\theta_k$ and reading it back by correlation is a Random Fourier Fe
 result is \emph{decodable} rather than merely reachable. Prior work characterises how numeracy is only
 partially captured by standard embeddings and where it breaks down \parencite{wallace2019numeracy}, and surveys
 the broader need for better numeric representation \parencite{thawani2021numbers}.
+
+\textbf{Numbers in transformers, and where I sit in that cluster.} Since I started this I have found a
+line of recent work aimed squarely at getting numbers into transformers, and I want to place myself in
+it honestly rather than let a reader think I missed it. Several of these overlap with things I claim, so
+I will concede the overlaps first and only then draw the line I think is real. \textbf{xVal}
+\parencite{golkar2023xval} tokenises a number as a single embedding scaled by its value, and \textbf{Abacus}
+\parencite{mcleish2024abacus} adds position embeddings over digits so a transformer can carry arithmetic
+across columns; both improve how a standard transformer handles numbers without changing what the number
+\emph{is} representationally. Closer to me, \textbf{FoNE} \parencite{zhou2025fone} embeds a number directly with
+Fourier features and \emph{decodes the digits back out by correlation}, so ``a computed number is
+decodable, not just reachable'' is \textbf{not} unique to my codec, and I concede that plainly. Closer
+still, \textbf{Neural Isomorphic Fields} (NIF) \parencite{sadeghi2026nif} explicitly builds an embedding in
+which $\phi(a+b)=\phi(a)\,\dot{+}\,\phi(b)$ and $\phi(a\times b)=\phi(a)\,\dot{\times}\,\phi(b)$, so
+``algebra in the embedding'' is not first either, and I concede that too.
+
+Having conceded both, here is the distinction I do stand on. NIF \emph{learns} two separate operators
+$\dot{+}$ and $\dot{\times}$ (plus an ordering network) and fits them with an isomorphism loss; its
+multiplication is reported around $53$--$73\%$ and reads to me as extrapolation rather than an exact
+identity. In PrismFormer there is \textbf{one} fixed operation, per-component complex multiply, and add
+and multiply are the \emph{same} bind acting on two differently-encoded bands: a linear-phase band where
+that bind adds values and a log-phase band where the identical bind multiplies them. Multiplication is
+therefore \textbf{native}, the same additive move on the log band, not the weak spot and not a learned
+second operator. And the same bind that composes numbers composes \emph{words}: FoNE and NIF are
+number-only modules, whereas my codec puts words and numbers in one space under one algebra. Holographic
+binding inside a transformer is itself prior art, \textbf{Hrrformer} \parencite{alam2023hrrformer} recasts
+self-attention with HRR bind/unbind, but it spends the binding on attention \emph{efficiency} ($O(n\log
+n)$ over long sequences), not on numeric semantics, so I cite it as the precedent for holographic
+binding-in-a-transformer aimed at a different target. Two ingredients have no counterpart in any of these:
+the parameter-lean \textbf{relation-banks} that replace every dense map, and the
+\textbf{exactly-mergeable gradients} (a detached buffer summed in fixed order gives bit-identical sharded
+sums), which is an orthogonal distributed-training property, not a numeric one. So the novelty I actually
+claim is the \emph{combination}, one fixed complex-multiply bind, over linear and log bands, decodable by
+correlation, unified across words and numbers, plus relation-banks and exact-merge, and \textbf{not}
+``decodable numbers'' or ``algebra in the embedding'' taken alone, since those already exist.
 
 \textbf{Parameter-efficient linear maps.} Replacing dense $W\!\cdot\! x$ with structured operators is
 well studied: circulant projections \parencite{cheng2015circulant} and structured transforms \parencite{sindhwani2015structured}. My relation-bank $y[i] = \sum_{k<S} \bank[k][i]\cdot x[(i+k)\bmod d]$ is a sum of $S$
@@ -399,6 +441,25 @@ transformer with hand-derived, gradient-checked backprop) whose shape is auto-se
 budget at a trainable depth. Both models share vocab, context, training order, LR schedule, and
 parameter budget at each setting; both pass a startup gradient check. Every number below is a mean over
 several random seeds with its standard deviation, produced by the listed command.
+
+\paragraph{Confirmatory versus exploratory, and what I do and do not claim statistically.} I did not
+pre-register anything, so I label rather than pretend. I treat as \textbf{confirmatory} the matched-budget
+head-to-heads that test the paper's headline claims directly: the worked multi-digit arithmetic gap
+(Section~\ref{sec:worked}), the relational-generalisation aggregate (Section~\ref{sec:relational}), the
+character language-model comparison (\S\,4.5), the codec-seed confound control (Section~\ref{sec:codecbaseline}),
+and the exact-merge check (Section~\ref{sec:exactmerge}), which is deterministic and not statistical at
+all. I treat as \textbf{exploratory} the diagnostics that probe \emph{why}, where I read the direction of
+an effect rather than a calibrated margin: the freeze-versus-unfreeze ablation in both regimes
+(Section~\ref{sec:worked}), the skill-sharing coupling arms (Section~\ref{sec:skillshare}), and the
+reverse-inference recovery arms (Section~\ref{sec:revinfer}). On significance I am honest that I report
+means and standard deviations over 4--8 seeds, not confidence intervals or hypothesis tests, so a reader
+should take the SDs as spread and not as inference. Where I lean on a comparison I check the coarse thing
+I can check without raw per-seed data, whether the gap exceeds the two means' combined spread: it does,
+by a wide margin, for the confirmatory arithmetic gap (e.g.\ add $54.9\%\pm8.5\%$ vs $0.4\%\pm0.6\%$) and
+the language model ($41.0\%\pm1.9\%$ vs $21.7\%\pm3.6\%$), and it does \emph{not} for the AlgFormer-vs-random-transformer
+row of the codec-seed control ($45.8\%\pm15.9\%$ vs $31.3\%\pm21.3\%$), which is exactly why I read that
+table only for the per-seed-consistent ``seeding hurts the transformer'' effect and not for an
+architectural margin. Where the spread swallows the gap I say so at the table rather than here.
 
 \begin{center}
 \begin{tabular}{@{}lrrll@{}}
@@ -734,8 +795,10 @@ multi-task load, and its unconditional benefit is legibility (Section~\ref{sec:w
 the headline for the shared-corpus and legibility reasons and state the isolated-task caveat. (iv)
 \textbf{Scale.} Results are at $\approx 10^5$ parameters; large-scale convergence of the full colony is
 demonstrated to \emph{run} but not yet to \emph{converge} at scale. (v) \textbf{Novelty.} The phasor codec and RFF
-encoding are prior art (Section~\ref{sec:related}); my contribution is their use as a trainable,
-exactly-mergeable transformer substrate and the swarm it enables.
+encoding are prior art, and neither ``decodable numbers'' (FoNE) nor ``algebra in the embedding'' (NIF)
+is first (Section~\ref{sec:related}); my contribution is the specific combination, one fixed
+complex-multiply bind over linear and log bands, decodable by correlation and unified across words and
+numbers, plus the relation-banks and the exactly-mergeable substrate and the swarm it enables.
 
 \section{Future work and open questions}
 
@@ -796,7 +859,7 @@ per-section commands are there so anyone can reproduce, or refute, each number.
 \section*{Reproducibility}
 
 The exact code that produced every number above is bundled with this archive as a frozen source
-snapshot (repository tag \texttt{paper-v2}), so it does not depend on the live repository, which
+snapshot (repository tag \texttt{paper-v3}), so it does not depend on the live repository, which
 continues to evolve. Build with the .NET 8 SDK; each command below is run from the snapshot root.
 
 \begin{itemize}
@@ -822,7 +885,7 @@ carried out my instructions; it did not originate the research. Every claim, num
 checked and verified by me, and I retain full responsibility for the correctness and adequacy of the
 results; where the evidence contradicted one of my own hypotheses, I report the contradiction
 (Section~\ref{sec:worked}). No claim here rests on an unverified automated argument: every quantitative
-result is produced by the reproducibility kit (frozen snapshot, tag \texttt{paper-v2}) and can be re-run
+result is produced by the reproducibility kit (frozen snapshot, tag \texttt{paper-v3}) and can be re-run
 or refuted independently. All experiments ran on commodity CPUs; no result depends on specialised
 accelerators.
 
