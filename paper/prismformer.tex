@@ -76,8 +76,8 @@ setting. Arithmetic emerges from the codec with \textbf{no training} (binding tw
 to their exact sum and product; $100/100$ and $81/81$ single-digit pairs exact). Given the same
 \emph{worked, column-by-column} problem, PrismFormer learns multi-digit addition, subtraction, and
 multiply/divide by a digit and generalises to \textbf{unseen} operand pairs (add $54.9\%$, sub
-$70.0\%$, mul $27.7\%$, div $33.2\%$ held-out) where a matched transformer given the identical problem
-stays near zero; and its working is legible one column at a time with no trained probe. On comparison
+$70.0\%$, mul $27.7\%$, div $33.2\%$ held-out) where a matched transformer, tuned hard (layer
+normalization, warmup, tuned Adam), still stays near zero; and its working is legible one column at a time with no trained probe. On comparison
 and relational tasks it generalises better than a transformer that \emph{fits the same training data}
 (held-out $65.9\%$ vs $49.1\%$ on the fair tasks; both reach $100\%$ on copy). It is a competitive
 character language model at matched size ($41.0\%$ vs $21.7\%$ next-character accuracy). I report a
@@ -513,12 +513,12 @@ table (held-out far below seen) from a learned algorithm (held-out about equal t
 \begin{center}
 \begin{tabular}{@{}lccc@{}}
 \toprule
-op & PrismFormer held-out [seen] & transformer held-out [seen] & face-decode \\
+op & PrismFormer held-out [seen] & transformer (tuned) held-out [seen] & face-decode \\
 \midrule
-add & $\mathbf{54.9\% \pm 8.5\%}$ [58\%] & $0.4\% \pm 0.6\%$ [1\%] & 69\% \\
-sub & $\mathbf{70.0\% \pm 8.9\%}$ [74\%] & $1.3\% \pm 0.5\%$ [1\%] & 67\% \\
-mul & $\mathbf{27.7\% \pm 3.3\%}$ [43\%] & $1.7\% \pm 2.1\%$ [1\%] & 61\% \\
-div & $\mathbf{33.2\% \pm 12.9\%}$ [43\%] & $2.0\% \pm 2.5\%$ [1\%] & 50\% \\
+add & $\mathbf{54.9\% \pm 8.5\%}$ [58\%] & $0.6\% \pm 0.4\%$ [1\%] & 69\% \\
+sub & $\mathbf{70.0\% \pm 8.9\%}$ [74\%] & $2.3\% \pm 1.1\%$ [2\%] & 67\% \\
+mul & $\mathbf{27.7\% \pm 3.3\%}$ [43\%] & $11.5\% \pm 3.9\%$ [9\%] & 61\% \\
+div & $\mathbf{33.2\% \pm 12.9\%}$ [43\%] & $2.8\% \pm 1.5\%$ [4\%] & 50\% \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -530,14 +530,16 @@ face-decode sits \emph{above} accuracy (e.g.\ $69\%$ vs $54.9\%$ on add, $61\%$ 
 glitch, and it is the point: the algebra has already placed the correct value in the representation more
 often than the argmax readout emits the matching token, so the gap between the two columns is a lossy
 final projection sitting on top of a more-correct computation, not a failure of the arithmetic itself.
-PrismFormer computes all four; the transformer does none of them. Given the identical worked problem it
-sits near zero even on pairs it \emph{was} trained on (it cannot do exact multi-digit arithmetic at this
-scale), while PrismFormer answers unseen problems far better than the transformer answers ones it has
-already seen. For add/sub, held-out matches seen (55 against 58, 70 against 74): it learned the column
+PrismFormer computes all four; the transformer essentially none, and this is a \emph{tuned} baseline
+(pre-norm LayerNorm with a gradient-checked backward, a warmup$\to$cosine schedule and tuned Adam,
+parameter-matched): tuning does not rescue the task. It stays near zero even on pairs it \emph{was}
+trained on for add, subtract and divide, and only partially learns multiply-by-a-digit ($11.5\%$ held-out,
+about its $9\%$ seen), while PrismFormer answers unseen problems far better than the transformer answers
+ones it has already seen. For add/sub, held-out matches seen (55 against 58, 70 against 74): it learned the column
 algorithm, not a lookup. Multiply and divide sit below their seen numbers (28 against 43, 33 against
 43); with a single-digit second operand the pair space is smaller, so part of the score is
-memorisation, but 28--33\% on genuinely unseen pairs against a transformer at $\sim$2\% is still the
-column step generalising. Full multi-digit $\times$ multi-digit multiplication is left to future work:
+memorisation, but 28--33\% on genuinely unseen pairs, well above the tuned transformer's $2.8$--$11.5\%$,
+is still the column step generalising. Full multi-digit $\times$ multi-digit multiplication is left to future work:
 producing the product digits directly is a digit \emph{convolution}, not a single-pass column, so it
 needs an explicit partial-product scratchpad (single-digit multiplies on the log band, summed on the
 linear band), the same two primitives, composed.
@@ -589,7 +591,7 @@ the realistic shared-corpus regime it is also \textbf{not} a cost: it wins. What
 on top of that is legibility: because the identity stays on the codec geometry, the answer decodes from
 the frozen bands with no probe (face-decode column above, and Section~\ref{sec:inside}). I report the
 frozen configuration as the headline on both grounds. Reproducible via
-\code{dotnet run --project bench -c Release -- --columnar} (isolated) and
+\code{dotnet run --project bench -c Release -- --columnar --tuned-baseline} (isolated) and
 \code{dotnet run --project bench -c Release} (shared-corpus ablation, printed under the main table).
 
 \subsection{Reading the computation from the inside}\label{sec:inside}
