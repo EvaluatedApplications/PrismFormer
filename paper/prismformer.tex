@@ -502,7 +502,9 @@ parity       & $77\%$ / $53\% \pm 14\%$ & $100\%$ / $\mathbf{68\% \pm 11\%}$ \\
 The transformer \textbf{fits its training data} ($85.8\%$ mean train accuracy on these tasks) and
 \textbf{ties} PrismFormer at $100\%$ on copy, so the comparison is fair. Across the \textbf{seven} fair tasks (the five above plus \emph{antonym} and \emph{capital})
 PrismFormer generalises markedly better: $\mathbf{65.9\%}$ vs $\mathbf{49.1\%}$ held-out, averaged over
-tasks and seeds. Two honest caveats. The two fair tasks not shown, antonym and capital, are tested only
+tasks and seeds. Tuning the baseline hard (pre-norm layer normalization, a warmup schedule and a tuned
+optimiser; Section~\ref{sec:lim}) lifts it only to $50.8\%$, so the gap is not a weak-baseline artefact.
+Two honest caveats. The two fair tasks not shown, antonym and capital, are tested only
 in the held-out \emph{reverse} direction (train ``opposite of A = B'', hold out ``opposite of B = A'';
 train ``capital of C = city'', hold out the inverse), and there \textbf{both models score
 $\approx 0\%$}: neither infers the symmetric relation at this scale. Those two zeros are \emph{included}
@@ -665,6 +667,33 @@ index order yields gradient tensors with an identical bitwise (FNV) checksum
 in seconds, at the production dimensions. This is the property that lets a mismatched-CPU colony sum into
 one coherent model.
 
+A checksum verifies the reduction; a small demonstration shows what it buys, across genuinely separate
+model instances. I instantiate a master and four \emph{separate} models and give each slave the data for
+only one of four toy skills (copy the first token, echo the last, max, min). Each round every slave
+computes the gradient for its one skill, serialises it, the master sums the four shards (\code{Grads.Add})
+and takes a single step, and the merged step is copied back to all.
+
+\begin{center}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+model & copy & last & max & min \\
+\midrule
+master (after merged rounds)                     & $100\%$ & $100\%$ & $99\%$ & $99\%$ \\
+a slave that only sent \emph{copy} gradients     & $100\%$ & $100\%$ & $99\%$ & $99\%$ \\
+control trained on \emph{copy} alone             & $100\%$ & $3\%$   & $12\%$ & $26\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The slave that only ever computed the \emph{copy} gradient ends up fluent in all four skills and
+byte-identical to the master, while a model trained on \emph{copy} alone stays near chance on the other
+three: it acquired skills it never saw data for, purely from the merged step. And the master's weights are
+\textbf{bit-identical} (max absolute parameter difference $0.0$) to a single-process model trained on the
+union of the four shards in the same order, so the four-way split is lossless, not approximate. This is
+the merge property made concrete across separate instances, not just a checksum. It is still a single
+process (a live multi-node run is future work, Section~\ref{sec:lim}; the over-the-wire bit-exact version
+runs in \code{PrismNet swarmtest}). Run \code{dotnet run --project bench -c Release -- --swarmdemo}.
+
 \subsection{The codec-seeded baseline control}\label{sec:codecbaseline}
 
 Because PrismFormer's number embeddings are seeded from the phasor codec while the transformer baseline
@@ -736,7 +765,10 @@ optimiser (elastic averaging is standard \parencite{zhang2015easgd}); it is a me
 of a shared representational coordinate system. Averaging weights from a \emph{shared} initialisation is
 already known to work \parencite{wortsman2022soups}; the contribution here is that the fixed codec extends
 near-lossless sharing to nodes that never shared one. Run
-\code{dotnet run --project bench -c Release -- --average}.
+\code{dotnet run --project bench -c Release -- --average}. The companion \code{--swarmdemo} shows the same
+bleed as a before/after matrix: two shared-init specialists (copy at $100\%$ / max at $12\%$, and the
+mirror) elastic-average into two generalists that each gain the other's skill ($12\to94\%$ and
+$25\to88\%$) as their weights collapse together (divergence $0.27\to0.008$).
 
 \subsection{Reverse inference, recovered}\label{sec:revinfer}
 
@@ -814,12 +846,15 @@ control does \emph{not} settle, because this single-token task is small and high
 architecture-versus-transformer margin on it; that separation lives in the worked multi-digit and
 relational results, and a stronger baseline is discussed next.
 
-\textbf{A stronger baseline, and the right prior art.} My transformer baseline is a hand-derived,
+\textbf{A tuned baseline does not close the gap.} My main transformer baseline is a hand-derived,
 gradient-checked encoder without layer normalisation, matched by parameter count. It fits its training
-data, so it is not a strawman, but it is not a modern reference either (no layer norm, no warmup, no
-tuned optimiser). A comparison against a well-tuned standard transformer, and against existing
-complex-valued and VSA / neuro-symbolic models, which I do not yet compare to, is needed before any
-architectural claim is settled.
+data, so it is not a strawman, but it is not a modern reference either, so I re-ran the fair multi-task
+suite against a properly tuned transformer: pre-norm layer normalisation (its backward hand-derived and
+gradient-checked to $0$), a warmup-then-cosine schedule, and a tuned Adam, still parameter-matched
+($298{,}752$ vs $295{,}936$, five seeds). It reaches $50.8\%$ held-out on the fair tasks, against
+$49.1\%$ for the untuned baseline and $65.9\%$ for PrismFormer: tuning the baseline moves it under two
+points and does not close the gap. What I still do not compare against is existing complex-valued and
+VSA / neuro-symbolic models, which is needed before the architectural claim is fully settled.
 
 \textbf{The swarm, actually distributed.} I show that sharded gradients merge bit-for-bit, that the
 mechanism runs, and that skill spreads across independently-initialised nodes through continuous coupling
