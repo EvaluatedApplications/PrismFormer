@@ -48,6 +48,7 @@ if (args.Contains("--emergence")) { EmergenceBench.Run(); return; }   // Levin-i
 if (args.Contains("--mesh")) { MeshBench.Run(); return; }   // FAITHFUL Prism Studio mesh: autonomous models chatter via weight-slice elastic-averaging + pair-gossip (NO gradient summing)
 if (args.Contains("--collapse")) { CollapseBench.Run(); return; }   // does the bleed damage holographic info? frozen vs unfrozen codec, algebra accuracy per tick — tests if the codec-pinning prevents collapse
 if (args.Contains("--average")) { XferBench.Run(); return; }   // can you average SEPARATELY-trained models? same/diff init x frozen/no codec — does the codec let genuinely-independent models average?
+if (args.Contains("--swarmdemo")) { SwarmDemoBench.Run(args); return; }   // clean before/after demo of the two swarm mechanisms: (1) bit-exact master–slave gradient sharing, (2) elastic-averaging skill bleed
 if (args.Contains("--codec-baseline")) { BaselineControlBench.Run(epochs == 150 ? 800 : epochs, tuned: tuned); return; }   // paper1 §6-A control: seed the transformer baseline from the same codec — is the gap init or architecture? (train long enough that the transformer FITS train)
 if (args.Contains("--imgcompose")) { ImageComposeBench.Run(); return; }   // COMPOSITIONAL text->image: draw two shapes from two labels; held-out pairings test NOVEL synthesis vs memorisation
 if (args.Contains("--imggen")) { ImageGenBench.Run(); return; }   // LEARNED text->image: AlgFormer generates an image pixel-by-pixel from a text label (image-GPT on the phasor substrate, nothing hardcoded)
