@@ -62,7 +62,9 @@ public sealed class MainForm : Form
     private readonly TextBox _replOut = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 10), BackColor = Color.FromArgb(24, 24, 28), ForeColor = Color.Gainsboro };
     private readonly TextBox _replIn = new() { Dock = DockStyle.Fill, Font = new Font("Consolas", 10) };
     private readonly Button _sendBtn = new() { Text = "Send", Dock = DockStyle.Fill };
-    private readonly CheckBox _oneShot = new() { Text = "no context", AutoSize = true, Padding = new Padding(4, 8, 6, 0) };   // straight-shot: answer the prompt with no conversation context
+    private readonly TextBox _askOut = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 10), BackColor = Color.FromArgb(24, 24, 28), ForeColor = Color.Gainsboro };   // its OWN output — never touches the chat transcript
+    private readonly TextBox _askIn = new() { Dock = DockStyle.Fill, Font = new Font("Consolas", 10) };   // "ask a question" — a straight-shot, context-free query
+    private readonly Button _askBtn = new() { Text = "Ask", Dock = DockStyle.Fill };
     private readonly Button _saveBtn = new() { Text = "Save", Width = 60 };
     private readonly Button _loadBtn = new() { Text = "Load", Width = 60 };
     private readonly Button _resetBtn = new() { Text = "Reset model", Width = 90 };
@@ -124,10 +126,10 @@ public sealed class MainForm : Form
     private void ApplyTheme()
     {
         BackColor = ClChrome; ForeColor = ClInk;
-        foreach (var tb in new[] { _replIn, _groupIn, _subReplIn }) { tb.BackColor = ClInput; tb.ForeColor = ClInk; tb.BorderStyle = BorderStyle.FixedSingle; }
+        foreach (var tb in new[] { _replIn, _askIn, _groupIn, _subReplIn }) { tb.BackColor = ClInput; tb.ForeColor = ClInk; tb.BorderStyle = BorderStyle.FixedSingle; }
         _hostCode.BackColor = ClPane; _hostCode.ForeColor = ClAccent; _hostCode.BorderStyle = BorderStyle.FixedSingle;
         foreach (var st in new[] { _status, _netStatus, _subStatus }) { st.BackColor = ClChrome; st.ForeColor = ClMuted; }
-        foreach (var cb in new[] { _autoClear, _oneShot }) cb.ForeColor = ClMuted;
+        _autoClear.ForeColor = ClMuted;
     }
 
     public MainForm()
@@ -181,18 +183,34 @@ public sealed class MainForm : Form
         // REPL (chat) on TOP, training log on BOTTOM — same horizontal split as the Network tab
         var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 360 };
 
-        var repl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3 };
-        repl.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-        repl.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        repl.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
-        repl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        repl.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        repl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
-        var rh = Header("REPL — the model continues your prompt   ·   tick “no context” for a straight-shot answer"); rh.Dock = DockStyle.Fill;
-        repl.Controls.Add(rh, 0, 0); repl.SetColumnSpan(rh, 3);
-        repl.Controls.Add(_replOut, 0, 1); repl.SetColumnSpan(_replOut, 3);
-        _oneShot.Anchor = AnchorStyles.Left;
-        repl.Controls.Add(_replIn, 0, 2); repl.Controls.Add(_oneShot, 1, 2); repl.Controls.Add(Flat(_sendBtn), 2, 2);
+        // top pane = the chat REPL (left) beside a separate "ask a question" box (right), each with its OWN output
+        var repl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
+        repl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 62));
+        repl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38));
+
+        var chat = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3 };
+        chat.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+        chat.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        chat.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        chat.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        chat.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
+        var ch = Header("REPL — chat; continues your prompt in context, and learns your replies"); ch.Dock = DockStyle.Fill;
+        chat.Controls.Add(ch, 0, 0); chat.SetColumnSpan(ch, 2);
+        chat.Controls.Add(_replOut, 0, 1); chat.SetColumnSpan(_replOut, 2);
+        chat.Controls.Add(_replIn, 0, 2); chat.Controls.Add(Flat(_sendBtn), 1, 2);
+
+        var ask = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3, Padding = new Padding(6, 0, 0, 0) };
+        ask.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+        ask.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        ask.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        ask.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        ask.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
+        var ah = Header("ASK A QUESTION — no context, a straight-shot answer"); ah.Dock = DockStyle.Fill;
+        ask.Controls.Add(ah, 0, 0); ask.SetColumnSpan(ah, 2);
+        ask.Controls.Add(_askOut, 0, 1); ask.SetColumnSpan(_askOut, 2);
+        ask.Controls.Add(_askIn, 0, 2); ask.Controls.Add(Flat(_askBtn), 1, 2);
+
+        repl.Controls.Add(chat, 0, 0); repl.Controls.Add(ask, 1, 0);
         split.Panel1.Controls.Add(repl);
 
         var logHdr = Header("training log"); logHdr.Dock = DockStyle.Top;
@@ -226,6 +244,8 @@ public sealed class MainForm : Form
         _autoClear.CheckedChanged += (_, _) => ToggleAutoClear();
         _sendBtn.Click += (_, _) => Send();
         _replIn.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Send(); } };
+        _askBtn.Click += (_, _) => Ask();
+        _askIn.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Ask(); } };
         return root;
     }
 
@@ -269,19 +289,6 @@ public sealed class MainForm : Form
         var q = _replIn.Text.Trim();
         if (q.Length == 0) return;
         _replIn.Clear();
-        if (_oneShot.Checked)   // STRAIGHT SHOT: answer this prompt with NO conversation context, and don't thread it into the transcript
-        {
-            _replOut.AppendText("you: " + q + "\r\nprism: "); _replOut.SelectionStart = _replOut.TextLength; _replOut.ScrollToCaret();
-            SetReplBusy(true);
-            Task.Run(() =>
-            {
-                string r;
-                try { r = CleanReply(_model.Serve("user: " + q).Continuation); }   // just this prompt, no prior turns
-                catch (Exception e) { r = "[error] " + e.Message; }
-                BeginInvoke(() => { _replOut.AppendText(r + "\r\n\r\n"); _replOut.SelectionStart = _replOut.TextLength; _replOut.ScrollToCaret(); SetReplBusy(false); });
-            });
-            return;
-        }
         _transcript += "user: " + q + "\n";   // human turn (a training TARGET). Serve primes "user: " for the reply — same slot as the group chat
         _replOut.AppendText("user: " + q + "\r\nprism: "); _replOut.SelectionStart = _replOut.TextLength; _replOut.ScrollToCaret();
         SetReplBusy(true);
@@ -302,11 +309,27 @@ public sealed class MainForm : Form
         });
     }
 
+    private void Ask()   // straight-shot: answer the question with NO conversation context; its own output, nothing saved or threaded into the chat
+    {
+        if (_replBusy) return;
+        var q = _askIn.Text.Trim(); if (q.Length == 0) return;
+        _askIn.Clear();
+        _askOut.AppendText("Q: " + q + "\r\nA: "); _askOut.SelectionStart = _askOut.TextLength; _askOut.ScrollToCaret();
+        SetReplBusy(true);
+        Task.Run(() =>
+        {
+            string r;
+            try { r = CleanReply(_model.Serve("user: " + q).Continuation); }   // just this prompt, no prior turns
+            catch (Exception e) { r = "[error] " + e.Message; }
+            BeginInvoke(() => { _askOut.AppendText(r + "\r\n\r\n"); _askOut.SelectionStart = _askOut.TextLength; _askOut.ScrollToCaret(); SetReplBusy(false); });
+        });
+    }
+
     // REPL busy state: lock input while the model/swarm is answering, with a live "responding…" indicator so it's clear it's still working (and you can't queue up messages)
     private void SetReplBusy(bool busy)
     {
         _replBusy = busy;
-        _sendBtn.Enabled = _replIn.Enabled = !busy;
+        _sendBtn.Enabled = _replIn.Enabled = _askBtn.Enabled = _askIn.Enabled = !busy;
         try { _replAnim?.Dispose(); } catch { } _replAnim = null;
         if (busy) { var n = 0; _replAnim = new System.Threading.Timer(_ => { try { BeginInvoke(() => _sendBtn.Text = new string('•', (n++ % 3) + 1)); } catch { } }, null, 0, 350); }
         else _sendBtn.Text = "Send";
