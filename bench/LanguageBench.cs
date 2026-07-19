@@ -13,9 +13,13 @@ namespace PrismFormer.Bench;
 /// </summary>
 internal static class LanguageBench
 {
-    public static void Run(int epochs = 30, int seeds = 5)
+    public static void Run(int epochs = 30, int seeds = 5, bool tuned = false)
     {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+        // TUNED baseline (--tuned-baseline): pre-norm LayerNorm + linear-warmup→cosine LR + explicit tuned Adam on the
+        // transformer only. AlgFormer's schedule is untouched, so this can only strengthen the baseline.
+        var warm = Math.Max(3, epochs / 20);
+        double LrTuned(int ep) { const double peak = 2e-3; if (ep <= warm) return peak * ep / warm; var t = (ep - warm) / (double)Math.Max(1, epochs - warm); return peak * (0.05 + 0.95 * 0.5 * (1 + Math.Cos(Math.PI * t))); }
         var text = Text;
         var chars = text.Distinct().OrderBy(c => c).ToArray();
         var cid = new Dictionary<char, int>(); for (var i = 0; i < chars.Length; i++) cid[chars[i]] = i;
@@ -42,14 +46,14 @@ internal static class LanguageBench
         foreach (var d in new[] { 24, 32, 40, 48, 56, 64, 80, 96 })
             foreach (var L in new[] { 2, 3, 4 })
                 foreach (var ff in new[] { 32, 64, 96, 128, 192, 256 })
-                { var p = new MiniTransformer(vocab, d, ff, L, ctx, 42); if (Math.Abs(p.ParamCount - targetParams) < bestDelta) { bestDelta = Math.Abs(p.ParamCount - targetParams); best = (d, L, ff); } }
+                { var p = new MiniTransformer(vocab, d, ff, L, ctx, 42, layerNorm: tuned); if (Math.Abs(p.ParamCount - targetParams) < bestDelta) { bestDelta = Math.Abs(p.ParamCount - targetParams); best = (d, L, ff); } }
 
-        Console.WriteLine($"PrismFormer vs pound-for-pound transformer - CHARACTER LANGUAGE MODELLING (both temperature-calibrated)   {DateTime.Now:yyyy-MM-dd HH:mm}");
-        if (!AlgFormer.GradCheck(out var ar) || !MiniTransformer.GradCheck(out var xr)) { Console.WriteLine("GRADCHECK FAILED"); return; }
+        Console.WriteLine($"PrismFormer vs pound-for-pound transformer - CHARACTER LANGUAGE MODELLING (both temperature-calibrated){(tuned ? "  [TUNED baseline: pre-norm LayerNorm + warmup→cosine + tuned Adam]" : "")}   {DateTime.Now:yyyy-MM-dd HH:mm}");
+        if (!AlgFormer.GradCheck(out var ar) || !MiniTransformer.GradCheck(out var xr, layerNorm: tuned)) { Console.WriteLine("GRADCHECK FAILED"); return; }
         var modeChar = held.GroupBy(e => e.Tgt).OrderByDescending(g => g.Count()).First().Key;
         var baseAcc = held.Count(e => e.Tgt == modeChar) / (double)held.Count;
         Console.WriteLine($"gradchecks pass   corpus {text.Length} chars, vocab {V}, ctx {ctx}   train {train.Count} / held {held.Count}   {seeds} seeds × {epochs} epochs");
-        Console.WriteLine($"params: transformer {new MiniTransformer(vocab, best.d, best.ff, best.L, ctx, 42).ParamCount:N0} (d={best.d}, dff={best.ff}, L={best.L})   prism {targetParams:N0}   baseline acc {baseAcc:P1}\n");
+        Console.WriteLine($"params: transformer {new MiniTransformer(vocab, best.d, best.ff, best.L, ctx, 42, layerNorm: tuned).ParamCount:N0} (d={best.d}, dff={best.ff}, L={best.L}{(tuned ? ", +LayerNorm" : "")})   prism {targetParams:N0}   baseline acc {baseAcc:P1}\n");
 
         // temperature scaling for BOTH (standard LM calibration): pick tau on a VAL slice, report bits/char on a TEST slice.
         var valN = Math.Max(20, held.Count / 3);
@@ -77,15 +81,16 @@ internal static class LanguageBench
         Parallel.For(0, seeds, s =>
         {
             var alg = AlgFormer.Mini(vocab, embedSeed: Seed, seed: 1 + s);
-            var xf = new MiniTransformer(vocab, best.d, best.ff, best.L, ctx, 42 + s);
+            var xf = new MiniTransformer(vocab, best.d, best.ff, best.L, ctx, 42 + s, layerNorm: tuned);
             for (var ep = 1; ep <= epochs; ep++)
             {
                 var lr = 2e-3 * (1.0 - 0.9 * (ep - 1) / Math.Max(1, epochs - 1));
+                var lx = tuned ? LrTuned(ep) : lr;
                 var order = Enumerable.Range(0, train.Count).ToArray();
                 var er = new Random(1000 + ep + 97 * s);
                 for (var i = order.Length - 1; i > 0; i--) { var j = er.Next(i + 1); (order[i], order[j]) = (order[j], order[i]); }
                 foreach (var i in order) { var (c, t) = train[i]; alg.TrainStep(c, t, lr); }
-                foreach (var i in order) { var (c, t) = train[i]; xf.TrainStep(c, t, lr); }
+                foreach (var i in order) { var (c, t) = train[i]; if (tuned) xf.TrainStep(c, t, lx, 0.9, 0.999, 1e-8); else xf.TrainStep(c, t, lx); }
             }
             (pAcc[s], pBits[s]) = Report(alg.LogitsFor, alg.Predict);
             (xAcc[s], xBits[s]) = Report(xf.LogitsFor, xf.Predict);

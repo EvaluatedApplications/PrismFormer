@@ -15,13 +15,13 @@ namespace PrismFormer.Gpu;
 /// </summary>
 public sealed class GpuTrainer : IDisposable
 {
-    const int TokenBudget = 24576;  // padded token-positions per GPU sub-batch (bounds memory: keeps full-1024 buckets under ~4GB)
+    readonly int _tokenBudget;      // padded token-positions per GPU sub-batch (bounds memory). Default keeps full-1024 windows under ~4GB; short-sequence workloads can pass a bigger budget to fill the card.
     readonly int _gpuMaxLen;        // sequences longer than this go to the CPU. FULL-GPU: = MaxContext, so nothing does.
 
     readonly AlgFormer _cpu;
     readonly GpuModel _gpu;
 
-    public GpuTrainer(AlgFormer cpu) { _cpu = cpu; _gpu = new GpuModel(cpu.Serialize()); _gpuMaxLen = _gpu.MaxContext; }
+    public GpuTrainer(AlgFormer cpu, int tokenBudget = 24576) { _cpu = cpu; _gpu = new GpuModel(cpu.Serialize()); _gpuMaxLen = _gpu.MaxContext; _tokenBudget = tokenBudget; }
 
     static byte[] GradBytes(float[] g) { using var ms = new MemoryStream(); var w = new BinaryWriter(ms); foreach (var x in g) w.Write((double)x); w.Flush(); return ms.ToArray(); }
 
@@ -61,7 +61,7 @@ public sealed class GpuTrainer : IDisposable
         for (var s = 0; s < order.Length;)
         {
             var e = s; var maxLen = 0;
-            while (e < order.Length) { var len = ex[order[e]].Ctx.Length; var nm = Math.Max(maxLen, len); if (e > s && (long)(e - s + 1) * nm > TokenBudget) break; maxLen = nm; e++; }
+            while (e < order.Length) { var len = ex[order[e]].Ctx.Length; var nm = Math.Max(maxLen, len); if (e > s && (long)(e - s + 1) * nm > _tokenBudget) break; maxLen = nm; e++; }
             var n = e - s; var toks = new int[n][]; var tgts = new int[n];
             for (var i = 0; i < n; i++) { var idx = order[s + i]; toks[i] = ex[idx].Ctx; tgts[i] = ex[idx].Target; }
             var (g, loss) = _gpu.Backward(toks, tgts);

@@ -16,7 +16,7 @@ namespace PrismFormer.Bench;
 /// </summary>
 internal static class BaselineControlBench
 {
-    public static void Run(int epochs = 800, int seeds = 5)
+    public static void Run(int epochs = 800, int seeds = 5, bool tuned = false)
     {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
         const int HI = 12;   // operands 0..12; held-out = 20% of in-range combinations (unseen operand pairs)
@@ -37,7 +37,13 @@ internal static class BaselineControlBench
             return int.TryParse(words[w], out var n) ? PhasorCodec.NumberFace(n) : PhasorCodec.Encode(words[w]);
         }
 
-        Console.WriteLine($"CODEC-SEEDED BASELINE CONTROL (paper1 §6-A) — {seeds} seeds x {epochs} ep, held-out add/sub 0..{HI} (unseen operand pairs)   {DateTime.Now:yyyy-MM-dd HH:mm}");
+        if (tuned)
+        {
+            var ok = MiniTransformer.GradCheck(out var xrl, layerNorm: true);
+            if (!ok) { Console.WriteLine($"LN GRADCHECK FAILED ({xrl:E1}) — aborting"); return; }
+            Console.WriteLine($"  LayerNorm backward gradcheck PASS (worst rel {xrl:E1})");
+        }
+        Console.WriteLine($"CODEC-SEEDED BASELINE CONTROL (paper1 §6-A){(tuned ? "  [TUNED: pre-norm LayerNorm + warmup→cosine@2e-3 + tuned Adam]" : "")} — {seeds} seeds x {epochs} ep, held-out add/sub 0..{HI} (unseen operand pairs)   {DateTime.Now:yyyy-MM-dd HH:mm}");
         Console.WriteLine("  Q: is AlgFormer's edge codec-seeded INIT, or ARCHITECTURE? Hand the transformer the SAME codec seeding and re-measure.");
         Console.WriteLine("  params:  AlgFormer ~242k   MiniTransformer ~805k (random & seeded identical; the ONLY difference is the embedding init)\n");
 
@@ -51,7 +57,10 @@ internal static class BaselineControlBench
         // never fits train. Both transformers share this identical schedule, so the random-vs-seeded control is fair.
         var warm = Math.Max(15, epochs / 20);
         double LrA(int ep) => 2e-3 * (1.0 - 0.9 * (ep - 1) / Math.Max(1, epochs - 1));
-        double LrX(int ep) { const double peak = 8e-4; if (ep <= warm) return peak * ep / warm; var t = (ep - warm) / (double)Math.Max(1, epochs - warm); return peak * (0.1 + 0.9 * 0.5 * (1 + Math.Cos(Math.PI * t))); }
+        // TUNED baseline (--tuned-baseline): the two transformers get pre-norm LayerNorm; with LN a pre-norm stack
+        // takes the full 2e-3 peak (matching AlgFormer) instead of the gentler 8e-4 a no-LN model needs to not diverge.
+        var peak = tuned ? 2e-3 : 8e-4;
+        double LrX(int ep) { if (ep <= warm) return peak * ep / warm; var t = (ep - warm) / (double)Math.Max(1, epochs - warm); return peak * (0.1 + 0.9 * 0.5 * (1 + Math.Cos(Math.PI * t))); }
 
         System.Threading.Tasks.Parallel.For(0, seeds, s =>
         {
@@ -69,8 +78,8 @@ internal static class BaselineControlBench
             var tp = train.Select(x => (Ctx(x), Tgt(x))).ToList();
 
             var alg = AlgFormer.Mini(vocab, embedSeed: Seed, seed: 1 + s);
-            var mtRand = new MiniTransformer(vocab, dModel: PhasorCodec.Dim, dff: 256, layers: 2, maxT: 4, seed: 1 + s);
-            var mtSeed = new MiniTransformer(vocab, dModel: PhasorCodec.Dim, dff: 256, layers: 2, maxT: 4, seed: 1 + s);
+            var mtRand = new MiniTransformer(vocab, dModel: PhasorCodec.Dim, dff: 256, layers: 2, maxT: 4, seed: 1 + s, layerNorm: tuned);
+            var mtSeed = new MiniTransformer(vocab, dModel: PhasorCodec.Dim, dff: 256, layers: 2, maxT: 4, seed: 1 + s, layerNorm: tuned);
             for (var w = 0; w < words.Count; w++) { var sd = Seed(w); Array.Copy(sd, mtSeed.Emb[w], PhasorCodec.Dim); }   // ONLY difference from mtRand
 
             for (var ep = 1; ep <= epochs; ep++)
@@ -78,8 +87,8 @@ internal static class BaselineControlBench
                 var order = Enumerable.Range(0, tp.Count).OrderBy(_ => rng.Next()).ToArray();
                 var la = LrA(ep); var lx = LrX(ep);
                 foreach (var i in order) { var (c, t) = tp[i]; alg.TrainStep(c, t, la); }
-                foreach (var i in order) { var (c, t) = tp[i]; mtRand.TrainStep(c, t, lx); }
-                foreach (var i in order) { var (c, t) = tp[i]; mtSeed.TrainStep(c, t, lx); }
+                foreach (var i in order) { var (c, t) = tp[i]; if (tuned) mtRand.TrainStep(c, t, lx, 0.9, 0.999, 1e-8); else mtRand.TrainStep(c, t, lx); }
+                foreach (var i in order) { var (c, t) = tp[i]; if (tuned) mtSeed.TrainStep(c, t, lx, 0.9, 0.999, 1e-8); else mtSeed.TrainStep(c, t, lx); }
             }
 
             double Acc(Func<int[], int> p, List<(int a, int b, char op, int c)> set) { var ok = 0; foreach (var x in set) if (p(Ctx(x)) == Tgt(x)) ok++; return ok / (double)set.Count; }

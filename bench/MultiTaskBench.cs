@@ -20,9 +20,15 @@ internal static class MultiTaskBench
 {
     internal readonly record struct Inst(string Task, string[] Prompt, string Target);
 
-    public static void Run(int seeds = 5, int epochs = 150, int hi = 12)
+    public static void Run(int seeds = 5, int epochs = 150, int hi = 12, bool tuned = false)
     {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+        // TUNED baseline (--tuned-baseline): the transformer gets the modern recipe — pre-norm LayerNorm, a
+        // linear-warmup→cosine-decay LR schedule, and an explicit tuned Adam (β1 .9, β2 .999, ε 1e-8). AlgFormer's
+        // own schedule is untouched, so this only STRENGTHENS the baseline. Run once with and once without the flag
+        // to report both. Warmup lets a pre-norm stack take the same 2e-3 peak the AlgFormer uses without diverging.
+        var warm = Math.Max(10, epochs / 20);
+        double LrTuned(int ep) { const double peak = 2e-3; if (ep <= warm) return peak * ep / warm; var t = (ep - warm) / (double)Math.Max(1, epochs - warm); return peak * (0.05 + 0.95 * 0.5 * (1 + Math.Cos(Math.PI * t))); }
 
         // ---- data (fixed across seeds; only model init + train order vary) ----
         var rng = new Random(7);
@@ -85,12 +91,12 @@ internal static class MultiTaskBench
         foreach (var d in new[] { 24, 32, 40, 48, 56, 64, 96, 128, 160, 192, 256 })
             foreach (var L in new[] { 2, 3, 4 })
                 foreach (var ff in new[] { 32, 48, 64, 96, 128, 160, 192, 256, 384, 512, 768, 1024 })
-                { var pr = new MiniTransformer(vocab, d, ff, L, 16, 42); var delta = Math.Abs(pr.ParamCount - targetParams); if (delta < bestDelta) { bestDelta = delta; best = (d, L, ff); } }
+                { var pr = new MiniTransformer(vocab, d, ff, L, 16, 42, layerNorm: tuned); var delta = Math.Abs(pr.ParamCount - targetParams); if (delta < bestDelta) { bestDelta = delta; best = (d, L, ff); } }
 
-        Console.WriteLine($"PrismFormer vs pound-for-pound transformer — multi-task generalisation   {DateTime.Now:yyyy-MM-dd HH:mm}");
-        if (!AlgFormer.GradCheck(out var ar) || !MiniTransformer.GradCheck(out var xr)) { Console.WriteLine("GRADCHECK FAILED — aborting"); return; }
-        Console.WriteLine($"gradchecks pass (prism {ar:E1}, transformer {xr:E1})");
-        Console.WriteLine($"params: transformer {new MiniTransformer(vocab, best.d, best.ff, best.L, 16, 42).ParamCount:N0} (d={best.d}, dff={best.ff}, L={best.L})   prism {targetParams:N0} (d={PhasorCodec.Dim}, S=8, L=2)");
+        Console.WriteLine($"PrismFormer vs pound-for-pound transformer — multi-task generalisation{(tuned ? "  [TUNED baseline: pre-norm LayerNorm + warmup→cosine + tuned Adam]" : "")}   {DateTime.Now:yyyy-MM-dd HH:mm}");
+        if (!AlgFormer.GradCheck(out var ar) || !MiniTransformer.GradCheck(out var xr, layerNorm: tuned)) { Console.WriteLine("GRADCHECK FAILED — aborting"); return; }
+        Console.WriteLine($"gradchecks pass (prism {ar:E1}, transformer{(tuned ? " +LN" : "")} {xr:E1})");
+        Console.WriteLine($"params: transformer {new MiniTransformer(vocab, best.d, best.ff, best.L, 16, 42, layerNorm: tuned).ParamCount:N0} (d={best.d}, dff={best.ff}, L={best.L}{(tuned ? ", +LayerNorm" : "")})   prism {targetParams:N0} (d={PhasorCodec.Dim}, S=8, L=2)");
         Console.WriteLine($"train {train.Count:N0}   held-out {held.Count:N0}   vocab {id.Count}   {seeds} seeds × {epochs} epochs\n");
 
         double Acc(Func<int[], int> predict, List<Inst> set, string task)
@@ -114,16 +120,17 @@ internal static class MultiTaskBench
         {
             var alg = new AlgFormer(vocab, shifts: 8, layers: 2, maxContext: 16, dModel: PhasorCodec.Dim, frozenPrefix: PhasorCodec.FrozenReals, embedSeed: Seed, seed: 1 + s);
             var algU = new AlgFormer(vocab, shifts: 8, layers: 2, maxContext: 16, dModel: PhasorCodec.Dim, frozenPrefix: 0, embedSeed: Seed, seed: 1 + s);
-            var xf = new MiniTransformer(vocab, best.d, best.ff, best.L, 16, 42 + s);
+            var xf = new MiniTransformer(vocab, best.d, best.ff, best.L, 16, 42 + s, layerNorm: tuned);
             for (var ep = 1; ep <= epochs; ep++)
             {
                 var lr = 2e-3 * (1.0 - 0.9 * (ep - 1) / Math.Max(1, epochs - 1));
+                var lx = tuned ? LrTuned(ep) : lr;   // transformer schedule (tuned = warmup→cosine); AlgFormer keeps its own
                 var order = Enumerable.Range(0, trainPairs.Count).ToArray();
                 var er = new Random(1000 + ep + 97 * s);
                 for (var i = order.Length - 1; i > 0; i--) { var j = er.Next(i + 1); (order[i], order[j]) = (order[j], order[i]); }
                 foreach (var idx in order) { var (c, t) = trainPairs[idx]; alg.TrainStep(c, t, lr); }
                 foreach (var idx in order) { var (c, t) = trainPairs[idx]; algU.TrainStep(c, t, lr); }
-                foreach (var idx in order) { var (c, t) = trainPairs[idx]; xf.TrainStep(c, t, lr); }
+                foreach (var idx in order) { var (c, t) = trainPairs[idx]; if (tuned) xf.TrainStep(c, t, lx, 0.9, 0.999, 1e-8); else xf.TrainStep(c, t, lx); }
             }
             foreach (var t in allTasks)
             {

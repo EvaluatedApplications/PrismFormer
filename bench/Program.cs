@@ -22,6 +22,10 @@ for (var i = 0; i < args.Length - 1; i++)
     if (args[i] == "--epochs") epochs = int.Parse(args[i + 1]);
     if (args[i] == "--hi") hi = int.Parse(args[i + 1]);
 }
+// --tuned-baseline: swap the transformer baseline for the MODERN, properly-tuned recipe (pre-norm LayerNorm +
+// linear-warmup→cosine LR + tuned Adam). It only strengthens the baseline (AlgFormer is untouched); combine with
+// the multi-task default, --lm, or --codec-baseline. Run each headline task once with and once without the flag.
+var tuned = args.Contains("--tuned-baseline");
 if (args.Contains("--sample")) { UpgradeBench.RunSample(args.SkipWhile(a => a != "--sample").Skip(1).ToArray()); return; }   // load checkpoint(s) + greedily generate — trained (coherent) vs fresh (garbage)
 if (args.Contains("--gradcheck")) { UpgradeBench.RunGradcheck(); return; }   // bitwise gradient checksum — must be unchanged by the scratch-reuse refactor
 if (args.Contains("--profile")) { UpgradeBench.RunProfile(); return; }   // training throughput/CPU-utilization/GC profiler (why the CPU doesn't saturate)
@@ -44,7 +48,10 @@ if (args.Contains("--emergence")) { EmergenceBench.Run(); return; }   // Levin-i
 if (args.Contains("--mesh")) { MeshBench.Run(); return; }   // FAITHFUL Prism Studio mesh: autonomous models chatter via weight-slice elastic-averaging + pair-gossip (NO gradient summing)
 if (args.Contains("--collapse")) { CollapseBench.Run(); return; }   // does the bleed damage holographic info? frozen vs unfrozen codec, algebra accuracy per tick — tests if the codec-pinning prevents collapse
 if (args.Contains("--average")) { XferBench.Run(); return; }   // can you average SEPARATELY-trained models? same/diff init x frozen/no codec — does the codec let genuinely-independent models average?
-if (args.Contains("--codec-baseline")) { BaselineControlBench.Run(epochs == 150 ? 800 : epochs); return; }   // paper1 §6-A control: seed the transformer baseline from the same codec — is the gap init or architecture? (train long enough that the transformer FITS train)
+if (args.Contains("--codec-baseline")) { BaselineControlBench.Run(epochs == 150 ? 800 : epochs, tuned: tuned); return; }   // paper1 §6-A control: seed the transformer baseline from the same codec — is the gap init or architecture? (train long enough that the transformer FITS train)
+if (args.Contains("--imgcompose")) { ImageComposeBench.Run(); return; }   // COMPOSITIONAL text->image: draw two shapes from two labels; held-out pairings test NOVEL synthesis vs memorisation
+if (args.Contains("--imggen")) { ImageGenBench.Run(); return; }   // LEARNED text->image: AlgFormer generates an image pixel-by-pixel from a text label (image-GPT on the phasor substrate, nothing hardcoded)
+if (args.Contains("--imgtext")) { ImageTextBench.Run(); return; }   // text<->image holographic codec: encode images as phasor faces, bind to text, decode both ways (round-trip, recognise, generate, compose)
 if (args.Contains("--revinfer")) { RevInferBench.Run(); return; }   // reverse inference: beat the paper's 0% via scratchpad (fact-in-context select) and algebra (commutative-bind HRR memory, reverse for free)
 if (args.Contains("--collatz")) { CollatzBench.Run(); return; }   // Collatz stopping-time probe: how much of a chaotic sequence can PrismFormer learn? (trend vs spikes, held-out + extrapolate)
 if (args.Contains("--prototype")) { PrototypeBench.Run(); return; }   // free prototype learning: bundle K holographic image encodings per class into a concept, few-shot curve, no training
@@ -53,9 +60,9 @@ if (args.Contains("--speck")) { SpeckDistinguisherBench.Run(); return; }   // Pr
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
-if (args.Contains("--lm")) { LanguageBench.Run(); return; }             // isolated capability: character language modelling
+if (args.Contains("--lm")) { LanguageBench.Run(tuned: tuned); return; }             // isolated capability: character language modelling
 if (args.Contains("--scale")) { ScaleBench.Run(); return; }            // does it scale? held-out compute vs model size
-if (!args.Contains("--legacy")) { MultiTaskBench.Run(seeds: 5, epochs: epochs); return; }   // seeded multi-task generalisation (train+held mean±sd) — the paper's §4.2
+if (!args.Contains("--legacy")) { MultiTaskBench.Run(seeds: 5, epochs: epochs, tuned: tuned); return; }   // seeded multi-task generalisation (train+held mean±sd) — the paper's §4.2
 var rng = new Random(7);
 var all = new List<Inst>();
 void Emit(string task, string[] prompt, object target) => all.Add(new Inst(task, prompt, target.ToString()!));

@@ -8,18 +8,28 @@ namespace PrismFormer.Bench;
 /// attention), L layers, single head, residuals, tanh FFN, learned token+position embeddings, softmax-CE readout
 /// at the last position, Adam. <see cref="GradCheck"/> verifies the backward pass against central finite
 /// differences at startup, so a training failure is a capability result, never a gradient bug.
+///
+/// <para>Opt-in <c>layerNorm:true</c> upgrades it to the MODERN PRE-NORM recipe (LayerNorm before the attention and
+/// MLP sublayers plus a final LayerNorm before the readout). This is the fair, properly-tuned baseline requested to
+/// answer the reviewer objection that the no-LayerNorm model may be a weak baseline rather than a strong one. The LN
+/// forward AND its hand-derived backward are gradient-checked (<see cref="GradCheck"/> with layerNorm:true). With
+/// <c>layerNorm:false</c> the model is bit-for-bit the original baseline, so both can be reported side by side.</para>
 /// </summary>
 public sealed class MiniTransformer
 {
     private readonly int _v, _d, _f, _layers, _maxT;
+    private readonly bool _ln;
     private const double Scale = 0.08;
+    private const double LnEps = 1e-5;
 
     internal readonly double[][] Emb, Pos, U;
     internal readonly double[] C;
     internal readonly LayerParams[] Ls;
+    internal readonly double[]? Gf, Bef;   // final pre-readout LayerNorm (layerNorm only)
 
     private readonly double[][] _gEmb, _gPos, _gU;
     private readonly double[] _gC;
+    private readonly double[]? _gGf, _gBef;
     private readonly LayerParams[] _gLs;
     private readonly List<(double[] p, double[] g, double[] m, double[] v)> _adam = new();
     private long _t;
@@ -28,11 +38,13 @@ public sealed class MiniTransformer
     {
         public required double[][] Wq, Wk, Wv, Wo, W1, W2;
         public required double[] B1, B2;
+        // Pre-norm LayerNorm gains/biases (layerNorm only): G1/Be1 normalise the attention input, G2/Be2 the MLP input.
+        public double[]? G1, Be1, G2, Be2;
     }
 
-    public MiniTransformer(int vocab, int dModel, int dff, int layers, int maxT, int seed = 42)
+    public MiniTransformer(int vocab, int dModel, int dff, int layers, int maxT, int seed = 42, bool layerNorm = false)
     {
-        _v = vocab; _d = dModel; _f = dff; _layers = layers; _maxT = maxT;
+        _v = vocab; _d = dModel; _f = dff; _layers = layers; _maxT = maxT; _ln = layerNorm;
         var rng = new Random(seed);
         double[] Row(int n, bool zero = false)
         {
@@ -40,6 +52,7 @@ public sealed class MiniTransformer
             if (!zero) for (var i = 0; i < n; i++) r[i] = (rng.NextDouble() - 0.5) * 2 * Scale;
             return r;
         }
+        double[] Ones(int n) { var r = new double[n]; for (var i = 0; i < n; i++) r[i] = 1.0; return r; }
         double[][] Mat(int rows, int cols, bool zero = false) => Enumerable.Range(0, rows).Select(_ => Row(cols, zero)).ToArray();
 
         Emb = Mat(_v, _d); Pos = Mat(_maxT, _d); U = Mat(_v, _d); C = Row(_v, true);
@@ -49,8 +62,16 @@ public sealed class MiniTransformer
         {
             Ls[l] = new LayerParams { Wq = Mat(_d, _d), Wk = Mat(_d, _d), Wv = Mat(_d, _d), Wo = Mat(_d, _d), W1 = Mat(_f, _d), B1 = Row(_f, true), W2 = Mat(_d, _f), B2 = Row(_d, true) };
             _gLs[l] = new LayerParams { Wq = Mat(_d, _d, true), Wk = Mat(_d, _d, true), Wv = Mat(_d, _d, true), Wo = Mat(_d, _d, true), W1 = Mat(_f, _d, true), B1 = Row(_f, true), W2 = Mat(_d, _f, true), B2 = Row(_d, true) };
+            if (_ln)
+            {
+                Ls[l].G1 = Ones(_d); Ls[l].Be1 = Row(_d, true); Ls[l].G2 = Ones(_d); Ls[l].Be2 = Row(_d, true);
+                _gLs[l].G1 = Row(_d, true); _gLs[l].Be1 = Row(_d, true); _gLs[l].G2 = Row(_d, true); _gLs[l].Be2 = Row(_d, true);
+            }
         }
+        if (_ln) { Gf = Ones(_d); Bef = Row(_d, true); _gGf = Row(_d, true); _gBef = Row(_d, true); }
+
         void Reg(double[][] p, double[][] g) { for (var i = 0; i < p.Length; i++) _adam.Add((p[i], g[i], new double[p[i].Length], new double[p[i].Length])); }
+        void Reg1(double[] p, double[] g) => _adam.Add((p, g, new double[p.Length], new double[p.Length]));
         Reg(Emb, _gEmb); Reg(Pos, _gPos); Reg(U, _gU);
         _adam.Add((C, _gC, new double[_v], new double[_v]));
         for (var l = 0; l < layers; l++)
@@ -59,7 +80,13 @@ public sealed class MiniTransformer
             Reg(Ls[l].W1, _gLs[l].W1); Reg(Ls[l].W2, _gLs[l].W2);
             _adam.Add((Ls[l].B1, _gLs[l].B1, new double[_f], new double[_f]));
             _adam.Add((Ls[l].B2, _gLs[l].B2, new double[_d], new double[_d]));
+            if (_ln)
+            {
+                Reg1(Ls[l].G1!, _gLs[l].G1!); Reg1(Ls[l].Be1!, _gLs[l].Be1!);
+                Reg1(Ls[l].G2!, _gLs[l].G2!); Reg1(Ls[l].Be2!, _gLs[l].Be2!);
+            }
         }
+        if (_ln) { Reg1(Gf!, _gGf!); Reg1(Bef!, _gBef!); }
     }
 
     public long ParamCount => _adam.Sum(x => (long)x.p.Length);
@@ -67,9 +94,45 @@ public sealed class MiniTransformer
     private sealed class Cache
     {
         public required double[][] X, Q, K, V, Ctx, M, A, Z;
+        // Pre-norm caches (layerNorm only): AttnIn = LN1(X) fed to Wq/Wk/Wv; MlpIn = LN2(M) fed to W1.
+        // Xhat/Istd are the normalised activations + inverse-std needed by the LN backward.
+        public double[][]? AttnIn, MlpIn, Xhat1, Xhat2;
+        public double[]? Istd1, Istd2;
     }
 
-    private (double[][] h, Cache[] caches) ForwardAll(int[] toks)
+    // LayerNorm forward over a single length-n vector. Returns (output, xhat, inverse-std) — xhat/istd feed the backward.
+    private static (double[] o, double[] xhat, double istd) LnFwd(double[] x, double[] g, double[] b)
+    {
+        var n = x.Length;
+        var mu = 0.0; for (var i = 0; i < n; i++) mu += x[i]; mu /= n;
+        var vr = 0.0; for (var i = 0; i < n; i++) { var dd = x[i] - mu; vr += dd * dd; } vr /= n;
+        var istd = 1.0 / Math.Sqrt(vr + LnEps);
+        var xhat = new double[n]; var o = new double[n];
+        for (var i = 0; i < n; i++) { xhat[i] = (x[i] - mu) * istd; o[i] = g[i] * xhat[i] + b[i]; }
+        return (o, xhat, istd);
+    }
+
+    // LayerNorm backward: accumulates dGain/dBias, returns grad wrt the LN input. Standard result
+    //   dx = istd * ( dxhat - mean(dxhat) - xhat * mean(dxhat*xhat) ),  dxhat = dOut * gain.
+    private double[] LnBwd(double[] dOut, double[] xhat, double istd, double[] g, double[] dg, double[] db)
+    {
+        var n = dOut.Length;
+        var dxhat = new double[n];
+        double s1 = 0, s2 = 0;
+        for (var i = 0; i < n; i++)
+        {
+            dg[i] += dOut[i] * xhat[i];
+            db[i] += dOut[i];
+            dxhat[i] = dOut[i] * g[i];
+            s1 += dxhat[i];
+            s2 += dxhat[i] * xhat[i];
+        }
+        var dx = new double[n];
+        for (var i = 0; i < n; i++) dx[i] = istd * (dxhat[i] - s1 / n - xhat[i] * s2 / n);
+        return dx;
+    }
+
+    private (double[][] h, Cache[] caches, double[] read, double[]? fXhat, double fIstd) ForwardAll(int[] toks)
     {
         var T = toks.Length;
         var h = new double[T][];
@@ -83,7 +146,16 @@ public sealed class MiniTransformer
         {
             var L = Ls[l];
             var X = h;
-            var q = Apply(L.Wq, X); var k = Apply(L.Wk, X); var v = Apply(L.Wv, X);
+
+            // --- pre-norm on the attention input ---
+            double[][] attnIn = X, xhat1 = null!; double[] istd1 = null!;
+            if (_ln)
+            {
+                attnIn = new double[T][]; xhat1 = new double[T][]; istd1 = new double[T];
+                for (var t = 0; t < T; t++) { var (o, xh, ist) = LnFwd(X[t], L.G1!, L.Be1!); attnIn[t] = o; xhat1[t] = xh; istd1[t] = ist; }
+            }
+
+            var q = Apply(L.Wq, attnIn); var k = Apply(L.Wk, attnIn); var v = Apply(L.Wv, attnIn);
             var a = new double[T][];
             var ctx = new double[T][];
             var inv = 1.0 / Math.Sqrt(_d);
@@ -98,51 +170,64 @@ public sealed class MiniTransformer
                 ctx[t] = new double[_d];
                 for (var j = 0; j < T; j++) for (var d = 0; d < _d; d++) ctx[t][d] += a[t][j] * v[j][d];
             }
-            var o = Apply(L.Wo, ctx);
+            var o2 = Apply(L.Wo, ctx);
             var m = new double[T][];
-            for (var t = 0; t < T; t++) { m[t] = new double[_d]; for (var d = 0; d < _d; d++) m[t][d] = X[t][d] + o[t][d]; }
+            for (var t = 0; t < T; t++) { m[t] = new double[_d]; for (var d = 0; d < _d; d++) m[t][d] = X[t][d] + o2[t][d]; }
+
+            // --- pre-norm on the MLP input ---
+            double[][] mlpIn = m, xhat2 = null!; double[] istd2 = null!;
+            if (_ln)
+            {
+                mlpIn = new double[T][]; xhat2 = new double[T][]; istd2 = new double[T];
+                for (var t = 0; t < T; t++) { var (o, xh, ist) = LnFwd(m[t], L.G2!, L.Be2!); mlpIn[t] = o; xhat2[t] = xh; istd2[t] = ist; }
+            }
+
             var z = new double[T][];
             var y = new double[T][];
             for (var t = 0; t < T; t++)
             {
                 z[t] = new double[_f];
-                for (var f = 0; f < _f; f++) { var acc = L.B1[f]; for (var d = 0; d < _d; d++) acc += L.W1[f][d] * m[t][d]; z[t][f] = Math.Tanh(acc); }
+                for (var f = 0; f < _f; f++) { var acc = L.B1[f]; for (var d = 0; d < _d; d++) acc += L.W1[f][d] * mlpIn[t][d]; z[t][f] = Math.Tanh(acc); }
                 y[t] = new double[_d];
                 for (var d = 0; d < _d; d++) { var acc = L.B2[d]; for (var f = 0; f < _f; f++) acc += L.W2[d][f] * z[t][f]; y[t][d] = m[t][d] + acc; }
             }
-            caches[l] = new Cache { X = X, Q = q, K = k, V = v, A = a, Ctx = ctx, M = m, Z = z };
+            caches[l] = new Cache { X = X, Q = q, K = k, V = v, A = a, Ctx = ctx, M = m, Z = z, AttnIn = attnIn, MlpIn = mlpIn, Xhat1 = xhat1, Xhat2 = xhat2, Istd1 = istd1, Istd2 = istd2 };
             h = y;
         }
-        return (h, caches);
+
+        // --- final pre-readout LayerNorm ---
+        var read = h[^1]; double[]? fXhat = null; double fIstd = 0;
+        if (_ln) { var (o, xh, ist) = LnFwd(h[^1], Gf!, Bef!); read = o; fXhat = xh; fIstd = ist; }
+        return (h, caches, read, fXhat, fIstd);
     }
 
-    private double[] Logits(double[] hLast)
+    private double[] Logits(double[] hRead)
     {
         var logit = new double[_v];
-        for (var v = 0; v < _v; v++) { var acc = C[v]; for (var d = 0; d < _d; d++) acc += U[v][d] * hLast[d]; logit[v] = acc; }
+        for (var v = 0; v < _v; v++) { var acc = C[v]; for (var d = 0; d < _d; d++) acc += U[v][d] * hRead[d]; logit[v] = acc; }
         return logit;
     }
 
     public int Predict(int[] toks)
     {
-        var (h, _) = ForwardAll(toks);
-        var logit = Logits(h[^1]);
+        var (_, _, read, _, _) = ForwardAll(toks);
+        var logit = Logits(read);
         var best = 0;
         for (var v = 1; v < _v; v++) if (logit[v] > logit[best]) best = v;
         return best;
     }
 
     /// <summary>Next-token logits at the final position (for probability/perplexity evaluation).</summary>
-    public double[] LogitsFor(int[] toks) { var (h, _) = ForwardAll(toks); return Logits(h[^1]); }
+    public double[] LogitsFor(int[] toks) { var (_, _, read, _, _) = ForwardAll(toks); return Logits(read); }
 
     /// <summary>Interpretability contrast: the opaque hidden vector at the last position — what a linear probe
     /// must be TRAINED to read. Unlike PrismFormer's phasor faces, nothing here is directly decodable.</summary>
-    public double[] LastHidden(int[] toks) { var (h, _) = ForwardAll(toks); return h[^1]; }
+    public double[] LastHidden(int[] toks) { var (_, _, read, _, _) = ForwardAll(toks); return read; }
 
     public double LossOnly(int[] toks, int answer)
     {
-        var (h, _) = ForwardAll(toks);
-        var logit = Logits(h[^1]);
+        var (_, _, read, _, _) = ForwardAll(toks);
+        var logit = Logits(read);
         var max = logit.Max(); var sum = 0.0;
         for (var v = 0; v < _v; v++) sum += Math.Exp(logit[v] - max);
         return -(logit[answer] - max - Math.Log(sum));
@@ -151,23 +236,27 @@ public sealed class MiniTransformer
     internal double AccumulateGrads(int[] toks, int answer)
     {
         var T = toks.Length;
-        var (h, caches) = ForwardAll(toks);
+        var (h, caches, read, fXhat, fIstd) = ForwardAll(toks);
 
-        var logit = Logits(h[^1]);
+        var logit = Logits(read);
         var max = logit.Max(); var sum = 0.0;
         var p = new double[_v];
         for (var v = 0; v < _v; v++) { p[v] = Math.Exp(logit[v] - max); sum += p[v]; }
         for (var v = 0; v < _v; v++) p[v] /= sum;
         var loss = -Math.Log(Math.Max(p[answer], 1e-300));
 
-        var dh = new double[T][];
-        for (var t = 0; t < T; t++) dh[t] = new double[_d];
+        // grad wrt the readout input (post final-LN vector)
+        var dRead = new double[_d];
         for (var v = 0; v < _v; v++)
         {
             var dz = p[v] - (v == answer ? 1.0 : 0.0);
             _gC[v] += dz;
-            for (var d = 0; d < _d; d++) { _gU[v][d] += dz * h[^1][d]; dh[^1][d] += dz * U[v][d]; }
+            for (var d = 0; d < _d; d++) { _gU[v][d] += dz * read[d]; dRead[d] += dz * U[v][d]; }
         }
+
+        var dh = new double[T][];
+        for (var t = 0; t < T; t++) dh[t] = new double[_d];
+        dh[^1] = _ln ? LnBwd(dRead, fXhat!, fIstd, Gf!, _gGf!, _gBef!) : dRead;
 
         for (var l = _layers - 1; l >= 0; l--)
         {
@@ -186,13 +275,16 @@ public sealed class MiniTransformer
                     G.B2[d] += dyd;
                     for (var f = 0; f < _f; f++) { G.W2[d][f] += dyd * cc.Z[t][f]; dZ[f] += L.W2[d][f] * dyd; }
                 }
+                var dMlpIn = new double[_d];   // grad wrt the MLP input (== LN2 output when LN on, else == m)
                 for (var f = 0; f < _f; f++)
                 {
                     var dP = dZ[f] * (1 - cc.Z[t][f] * cc.Z[t][f]);
                     if (dP == 0) continue;
                     G.B1[f] += dP;
-                    for (var d = 0; d < _d; d++) { G.W1[f][d] += dP * cc.M[t][d]; dM[t][d] += L.W1[f][d] * dP; }
+                    for (var d = 0; d < _d; d++) { G.W1[f][d] += dP * cc.MlpIn![t][d]; dMlpIn[d] += L.W1[f][d] * dP; }
                 }
+                if (_ln) { var dm2 = LnBwd(dMlpIn, cc.Xhat2![t], cc.Istd2![t], L.G2!, G.G2!, G.Be2!); for (var d = 0; d < _d; d++) dM[t][d] += dm2[d]; }
+                else for (var d = 0; d < _d; d++) dM[t][d] += dMlpIn[d];
             }
 
             var dX = new double[T][];
@@ -231,9 +323,21 @@ public sealed class MiniTransformer
                 }
             }
 
-            BackProject(Ls[l].Wq, G.Wq, cc.X, dQ, dX);
-            BackProject(Ls[l].Wk, G.Wk, cc.X, dK, dX);
-            BackProject(Ls[l].Wv, G.Wv, cc.X, dV, dX);
+            if (_ln)
+            {
+                var dAttnIn = new double[T][];
+                for (var t = 0; t < T; t++) dAttnIn[t] = new double[_d];
+                BackProject(L.Wq, G.Wq, cc.AttnIn!, dQ, dAttnIn);
+                BackProject(L.Wk, G.Wk, cc.AttnIn!, dK, dAttnIn);
+                BackProject(L.Wv, G.Wv, cc.AttnIn!, dV, dAttnIn);
+                for (var t = 0; t < T; t++) { var dx1 = LnBwd(dAttnIn[t], cc.Xhat1![t], cc.Istd1![t], L.G1!, G.G1!, G.Be1!); for (var d = 0; d < _d; d++) dX[t][d] += dx1[d]; }
+            }
+            else
+            {
+                BackProject(L.Wq, G.Wq, cc.X, dQ, dX);
+                BackProject(L.Wk, G.Wk, cc.X, dK, dX);
+                BackProject(L.Wv, G.Wv, cc.X, dV, dX);
+            }
             dh = dX;
         }
 
@@ -270,6 +374,14 @@ public sealed class MiniTransformer
         return loss;
     }
 
+    /// <summary>Tuned-optimiser variant: same step but with explicit Adam betas/eps (the tuned baseline sets these).</summary>
+    public double TrainStep(int[] toks, int answer, double lr, double b1, double b2, double eps)
+    {
+        var loss = AccumulateGrads(toks, answer);
+        Step(lr, b1, b2, eps);
+        return loss;
+    }
+
     private double[][] Apply(double[][] w, double[][] x)
     {
         var T = x.Length;
@@ -300,16 +412,17 @@ public sealed class MiniTransformer
             }
     }
 
-    /// <summary>Startup self-verification: analytic vs central-finite-difference gradients on a tiny config.</summary>
-    public static bool GradCheck(out double worstRel)
+    /// <summary>Startup self-verification: analytic vs central-finite-difference gradients on a tiny config. Pass
+    /// <paramref name="layerNorm"/> to also gradient-check the pre-norm LayerNorm gains/biases (attention, MLP, final).</summary>
+    public static bool GradCheck(out double worstRel, bool layerNorm = false)
     {
-        var xf = new MiniTransformer(vocab: 9, dModel: 4, dff: 5, layers: 2, maxT: 4, seed: 6);
+        var xf = new MiniTransformer(vocab: 9, dModel: 4, dff: 5, layers: 2, maxT: 4, seed: 6, layerNorm: layerNorm);
         int[] toks = { 3, 1, 7, 2 };
         const int ans = 5; const double eps = 1e-5;
         xf.AccumulateGrads(toks, ans);
 
         worstRel = 0;
-        var probes = new (double[] p, double[] g, string name)[]
+        var probes = new List<(double[] p, double[] g, string name)>
         {
             (xf.Emb[3], xf._gEmb[3], "Emb"), (xf.Pos[0], xf._gPos[0], "Pos"), (xf.U[5], xf._gU[5], "U"), (xf.C, xf._gC, "C"),
             (xf.Ls[0].Wq[1], xf._gLs[0].Wq[1], "Wq0"), (xf.Ls[1].Wk[0], xf._gLs[1].Wk[0], "Wk1"),
@@ -317,13 +430,19 @@ public sealed class MiniTransformer
             (xf.Ls[0].W1[2], xf._gLs[0].W1[2], "W1"), (xf.Ls[1].W2[1], xf._gLs[1].W2[1], "W2"),
             (xf.Ls[0].B1, xf._gLs[0].B1, "B1"), (xf.Ls[1].B2, xf._gLs[1].B2, "B2"),
         };
-        foreach (var (p, g, _) in probes)
-            for (var i = 0; i < Math.Min(2, p.Length); i++)
+        if (layerNorm)
+        {
+            probes.Add((xf.Ls[0].G1!, xf._gLs[0].G1!, "G1"));   probes.Add((xf.Ls[0].Be1!, xf._gLs[0].Be1!, "Be1"));
+            probes.Add((xf.Ls[1].G2!, xf._gLs[1].G2!, "G2"));   probes.Add((xf.Ls[1].Be2!, xf._gLs[1].Be2!, "Be2"));
+            probes.Add((xf.Gf!, xf._gGf!, "Gf"));               probes.Add((xf.Bef!, xf._gBef!, "Bef"));
+        }
+        foreach (var (pp, g, _) in probes)
+            for (var i = 0; i < Math.Min(2, pp.Length); i++)
             {
-                var keep = p[i];
-                p[i] = keep + eps; var up = xf.LossOnly(toks, ans);
-                p[i] = keep - eps; var dn = xf.LossOnly(toks, ans);
-                p[i] = keep;
+                var keep = pp[i];
+                pp[i] = keep + eps; var up = xf.LossOnly(toks, ans);
+                pp[i] = keep - eps; var dn = xf.LossOnly(toks, ans);
+                pp[i] = keep;
                 var numeric = (up - dn) / (2 * eps);
                 var rel = Math.Abs(numeric - g[i]) / Math.Max(1e-6, Math.Abs(numeric) + Math.Abs(g[i]));
                 if (Math.Abs(numeric - g[i]) > 1e-7) worstRel = Math.Max(worstRel, rel);
