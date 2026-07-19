@@ -17,10 +17,13 @@ using PrismFormer.Bench;
 
 try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
 var epochs = 150; var hi = 12;
+int? seedsArg = null, stepsArg = null;   // optional --seeds / --steps overrides (used by --columnar; smoke vs full sweep)
 for (var i = 0; i < args.Length - 1; i++)
 {
     if (args[i] == "--epochs") epochs = int.Parse(args[i + 1]);
     if (args[i] == "--hi") hi = int.Parse(args[i + 1]);
+    if (args[i] == "--seeds") seedsArg = int.Parse(args[i + 1]);
+    if (args[i] == "--steps") stepsArg = int.Parse(args[i + 1]);
 }
 // --tuned-baseline: swap the transformer baseline for the MODERN, properly-tuned recipe (pre-norm LayerNorm +
 // linear-warmup→cosine LR + tuned Adam). It only strengthens the baseline (AlgFormer is untouched); combine with
@@ -59,7 +62,7 @@ if (args.Contains("--prototype")) { PrototypeBench.Run(); return; }   // free pr
 if (args.Contains("--distinguish")) { CryptoDistinguisherBench.Run(); return; }   // reduced-round neural distinguisher (Gohr-style): PrismFormer's reach at telling round-reduced output from random
 if (args.Contains("--speck")) { SpeckDistinguisherBench.Run(); return; }   // PrismFormer vs Gohr's real Speck32/64 benchmark: distinguisher accuracy at 5-8 rounds
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
-if (args.Contains("--columnar")) { ColumnarBench.Run(); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer
+if (args.Contains("--columnar")) { ColumnarBench.Run(seeds: seedsArg ?? 4, steps: stepsArg ?? 15000, tuned: tuned); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer (--tuned-baseline strengthens the transformer)
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
 if (args.Contains("--lm")) { LanguageBench.Run(tuned: tuned); return; }             // isolated capability: character language modelling
 if (args.Contains("--scale")) { ScaleBench.Run(); return; }            // does it scale? held-out compute vs model size
