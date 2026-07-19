@@ -62,6 +62,7 @@ public sealed class MainForm : Form
     private readonly TextBox _replOut = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 10), BackColor = Color.FromArgb(24, 24, 28), ForeColor = Color.Gainsboro };
     private readonly TextBox _replIn = new() { Dock = DockStyle.Fill, Font = new Font("Consolas", 10) };
     private readonly Button _sendBtn = new() { Text = "Send", Dock = DockStyle.Fill };
+    private readonly CheckBox _oneShot = new() { Text = "no context", AutoSize = true, Padding = new Padding(4, 8, 6, 0) };   // straight-shot: answer the prompt with no conversation context
     private readonly Button _saveBtn = new() { Text = "Save", Width = 60 };
     private readonly Button _loadBtn = new() { Text = "Load", Width = 60 };
     private readonly Button _resetBtn = new() { Text = "Reset model", Width = 90 };
@@ -94,6 +95,41 @@ public sealed class MainForm : Form
     private readonly TextBox _subReplIn = new() { Dock = DockStyle.Fill, Font = new Font("Consolas", 10) };
     private readonly Button _subSend = new() { Text = "Send", Width = 60 };
 
+    // ═══════════════ paint / theme ═══════════════
+    static readonly Color ClChrome = Color.FromArgb(37, 39, 46);    // form, toolbars, headers
+    static readonly Color ClPane   = Color.FromArgb(22, 23, 28);    // console panes
+    static readonly Color ClInput  = Color.FromArgb(32, 34, 40);    // text inputs
+    static readonly Color ClInk    = Color.Gainsboro;
+    static readonly Color ClMuted  = Color.FromArgb(150, 158, 172);
+    static readonly Color ClAccent = Color.FromArgb(64, 200, 214);  // cyan
+    static readonly Color ClStop   = Color.FromArgb(226, 132, 96);  // amber (stop / danger)
+
+    static Label Header(string t) => new()
+    {
+        Text = t, ForeColor = ClAccent, BackColor = ClChrome, Height = 22,
+        Font = new Font("Consolas", 8.5f, FontStyle.Bold), TextAlign = ContentAlignment.MiddleLeft,
+        Padding = new Padding(9, 0, 0, 0)
+    };
+    static Button Flat(Button b, bool primary = false)
+    {
+        b.FlatStyle = FlatStyle.Flat;
+        b.FlatAppearance.BorderSize = 1;
+        b.FlatAppearance.BorderColor = primary ? ClAccent : Color.FromArgb(72, 76, 86);
+        b.BackColor = primary ? Color.FromArgb(28, 56, 62) : ClChrome;
+        b.ForeColor = primary ? ClAccent : ClInk;
+        b.Font = new Font("Segoe UI", 9);
+        b.Height = 28; b.Margin = new Padding(3, 5, 3, 5);
+        return b;
+    }
+    private void ApplyTheme()
+    {
+        BackColor = ClChrome; ForeColor = ClInk;
+        foreach (var tb in new[] { _replIn, _groupIn, _subReplIn }) { tb.BackColor = ClInput; tb.ForeColor = ClInk; tb.BorderStyle = BorderStyle.FixedSingle; }
+        _hostCode.BackColor = ClPane; _hostCode.ForeColor = ClAccent; _hostCode.BorderStyle = BorderStyle.FixedSingle;
+        foreach (var st in new[] { _status, _netStatus, _subStatus }) { st.BackColor = ClChrome; st.ForeColor = ClMuted; }
+        foreach (var cb in new[] { _autoClear, _oneShot }) cb.ForeColor = ClMuted;
+    }
+
     public MainForm()
     {
         Text = $"Prism Studio — {PrismSpec.Signature}";
@@ -103,13 +139,14 @@ public sealed class MainForm : Form
         RefreshRepoData();   // every launch: copy the repo's shipped data into the persistent AppData folder (overwrite)
         _model = new StudioModel(_dataDir);
         _paramCount = _model.ParamCount;   // once
+        ApplyTheme();   // apply the dark + cyan theme to the shared controls
 
         var tabs = new TabControl { Dock = DockStyle.Fill };
-        var modelTab = new TabPage("Model") { Padding = new Padding(3) };
+        var modelTab = new TabPage("Model") { Padding = new Padding(3), BackColor = ClChrome };
         modelTab.Controls.Add(BuildModelTab());
-        var netTab = new TabPage("Network") { Padding = new Padding(3) };
+        var netTab = new TabPage("Network") { Padding = new Padding(3), BackColor = ClChrome };
         netTab.Controls.Add(BuildNetworkTab());
-        var subTab = new TabPage("Sub-node") { Padding = new Padding(3) };
+        var subTab = new TabPage("Sub-node") { Padding = new Padding(3), BackColor = ClChrome };
         subTab.Controls.Add(BuildSubnodeTab());
         tabs.TabPages.Add(modelTab);
         tabs.TabPages.Add(netTab);
@@ -132,33 +169,37 @@ public sealed class MainForm : Form
 
     private Control BuildModelTab()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = ClChrome };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true };
-        Label Cap(string t) => new() { Text = t, AutoSize = true, Padding = new Padding(8, 10, 0, 0) };
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true, BackColor = ClChrome };
         var openBtn = new Button { Text = "Open data folder", Width = 120 };
         var clearBtn = new Button { Text = "Clear log", Width = 70 };
-        bar.Controls.AddRange(new Control[] { _trainBtn, openBtn, _saveBtn, _loadBtn, _resetBtn, clearBtn, _autoClear });
+        bar.Controls.AddRange(new Control[] { Flat(_trainBtn, true), Flat(openBtn), Flat(_saveBtn), Flat(_loadBtn), Flat(_resetBtn), Flat(clearBtn), _autoClear });
 
-        var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterDistance = 470 };
-        split.Panel1.Controls.Add(_log);
-        split.Panel1.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 22, Controls = { new Label { Text = "training log", Dock = DockStyle.Fill } } });
+        // REPL (chat) on TOP, training log on BOTTOM — same horizontal split as the Network tab
+        var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 360 };
 
-        var right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3 };
-        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-        right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        right.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
-        var lbl = new Label { Text = "REPL — the model continues your prompt", Dock = DockStyle.Fill };
-        right.Controls.Add(lbl, 0, 0); right.SetColumnSpan(lbl, 2);
-        right.Controls.Add(_replOut, 0, 1); right.SetColumnSpan(_replOut, 2);
-        right.Controls.Add(_replIn, 0, 2); right.Controls.Add(_sendBtn, 1, 2);
-        split.Panel2.Controls.Add(right);
+        var repl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3 };
+        repl.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+        repl.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        repl.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        repl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        repl.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        repl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
+        var rh = Header("REPL — the model continues your prompt   ·   tick “no context” for a straight-shot answer"); rh.Dock = DockStyle.Fill;
+        repl.Controls.Add(rh, 0, 0); repl.SetColumnSpan(rh, 3);
+        repl.Controls.Add(_replOut, 0, 1); repl.SetColumnSpan(_replOut, 3);
+        _oneShot.Anchor = AnchorStyles.Left;
+        repl.Controls.Add(_replIn, 0, 2); repl.Controls.Add(_oneShot, 1, 2); repl.Controls.Add(Flat(_sendBtn), 2, 2);
+        split.Panel1.Controls.Add(repl);
 
-        var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        var logHdr = Header("training log"); logHdr.Dock = DockStyle.Top;
+        split.Panel2.Controls.Add(_log);
+        split.Panel2.Controls.Add(logHdr);
+
+        var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = ClChrome };
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         outer.Controls.Add(_status, 0, 0);
@@ -193,7 +234,7 @@ public sealed class MainForm : Form
         if (_trainCts is null)
         {
             _trainCts = new CancellationTokenSource();
-            _trainBtn.Text = "■ Stop";
+            _trainBtn.Text = "■ Stop"; _trainBtn.BackColor = Color.FromArgb(58, 34, 28); _trainBtn.ForeColor = ClStop; _trainBtn.FlatAppearance.BorderColor = ClStop;
             _saveBtn.Enabled = _loadBtn.Enabled = _resetBtn.Enabled = false;   // Save/Load/Reset contend with the training writer — off while training
             var ct = _trainCts.Token;
             if (!_model.Hosting) EnableShare();   // automatic — training always offers to the swarm
@@ -216,7 +257,7 @@ public sealed class MainForm : Form
                 try { _model.Train(int.MaxValue, 5.0, s => BeginInvoke(() => UpdateStatus(s)), s => BeginInvoke(() => Log(s)), ct); }   // open-ended — runs until Stop
                 catch (Exception e) { BeginInvoke(() => Log("[train] " + e.Message)); }
                 try { _model.Save(_savePath); } catch { }
-                BeginInvoke(() => { _trainCts = null; _trainBtn.Text = "▶ Train"; _trainBtn.Enabled = true; _saveBtn.Enabled = _loadBtn.Enabled = _resetBtn.Enabled = true; _bleedTimer?.Dispose(); _bleedTimer = null; _mainSaver?.Dispose(); _mainSaver = null; Log("[train] stopped · saved"); });
+                BeginInvoke(() => { _trainCts = null; _trainBtn.Text = "▶ Train"; _trainBtn.BackColor = Color.FromArgb(28, 56, 62); _trainBtn.ForeColor = ClAccent; _trainBtn.FlatAppearance.BorderColor = ClAccent; _trainBtn.Enabled = true; _saveBtn.Enabled = _loadBtn.Enabled = _resetBtn.Enabled = true; _bleedTimer?.Dispose(); _bleedTimer = null; _mainSaver?.Dispose(); _mainSaver = null; Log("[train] stopped · saved"); });
             });
         }
         else { _trainCts.Cancel(); _bleedTimer?.Dispose(); _bleedTimer = null; _mainSaver?.Dispose(); _mainSaver = null; _trainBtn.Text = "■ stopping…"; _trainBtn.Enabled = false; UpdateStatus("stopping…"); }
@@ -228,6 +269,19 @@ public sealed class MainForm : Form
         var q = _replIn.Text.Trim();
         if (q.Length == 0) return;
         _replIn.Clear();
+        if (_oneShot.Checked)   // STRAIGHT SHOT: answer this prompt with NO conversation context, and don't thread it into the transcript
+        {
+            _replOut.AppendText("you: " + q + "\r\nprism: "); _replOut.SelectionStart = _replOut.TextLength; _replOut.ScrollToCaret();
+            SetReplBusy(true);
+            Task.Run(() =>
+            {
+                string r;
+                try { r = CleanReply(_model.Serve("user: " + q).Continuation); }   // just this prompt, no prior turns
+                catch (Exception e) { r = "[error] " + e.Message; }
+                BeginInvoke(() => { _replOut.AppendText(r + "\r\n\r\n"); _replOut.SelectionStart = _replOut.TextLength; _replOut.ScrollToCaret(); SetReplBusy(false); });
+            });
+            return;
+        }
         _transcript += "user: " + q + "\n";   // human turn (a training TARGET). Serve primes "user: " for the reply — same slot as the group chat
         _replOut.AppendText("user: " + q + "\r\nprism: "); _replOut.SelectionStart = _replOut.TextLength; _replOut.ScrollToCaret();
         SetReplBusy(true);
@@ -296,31 +350,34 @@ public sealed class MainForm : Form
 
     private Control BuildSubnodeTab()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = ClChrome };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true };
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true, BackColor = ClChrome };
         var clearBtn = new Button { Text = "Clear log", Width = 70 };
-        bar.Controls.AddRange(new Control[] { _subBtn, clearBtn });
+        bar.Controls.AddRange(new Control[] { Flat(_subBtn, true), Flat(clearBtn) });
 
-        var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterDistance = 470 };
-        split.Panel1.Controls.Add(_subLog);
-        split.Panel1.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 22, Controls = { new Label { Text = "sub-node training log", Dock = DockStyle.Fill } } });
+        // sub-node REPL on TOP, training log on BOTTOM — same horizontal split as the other tabs
+        var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 360 };
 
-        var right = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3 };
-        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
-        right.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        right.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
-        var lbl = new Label { Text = "sub-node REPL — chat with this cell (a second, separate creature)", Dock = DockStyle.Fill };
-        right.Controls.Add(lbl, 0, 0); right.SetColumnSpan(lbl, 2);
-        right.Controls.Add(_subReplOut, 0, 1); right.SetColumnSpan(_subReplOut, 2);
-        right.Controls.Add(_subReplIn, 0, 2); right.Controls.Add(_subSend, 1, 2);
-        split.Panel2.Controls.Add(right);
+        var repl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3 };
+        repl.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
+        repl.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        repl.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
+        repl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        repl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
+        var rh = Header("sub-node REPL — chat with this cell (a second, separate creature)"); rh.Dock = DockStyle.Fill;
+        repl.Controls.Add(rh, 0, 0); repl.SetColumnSpan(rh, 2);
+        repl.Controls.Add(_subReplOut, 0, 1); repl.SetColumnSpan(_subReplOut, 2);
+        repl.Controls.Add(_subReplIn, 0, 2); repl.Controls.Add(Flat(_subSend), 1, 2);
+        split.Panel1.Controls.Add(repl);
 
-        var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        var logHdr = Header("sub-node training log"); logHdr.Dock = DockStyle.Top;
+        split.Panel2.Controls.Add(_subLog);
+        split.Panel2.Controls.Add(logHdr);
+
+        var outer = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, BackColor = ClChrome };
         outer.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         outer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         outer.Controls.Add(_subStatus, 0, 0);
@@ -464,33 +521,35 @@ public sealed class MainForm : Form
     // ════════════════ Network tab ════════════════
     private Control BuildNetworkTab()
     {
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 44));
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = ClChrome };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 46));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 24));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoScroll = true };
-        Label Cap(string t) => new() { Text = t, AutoSize = true, Padding = new Padding(12, 9, 0, 0) };
+        var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true, AutoScroll = true, BackColor = ClChrome };
+        Label Cap(string t) => new() { Text = t, AutoSize = true, ForeColor = ClMuted, Padding = new Padding(12, 11, 0, 0) };
         var copyBtn = new Button { Text = "Copy", Width = 56 };
         var clearNetBtn = new Button { Text = "Clear log", Width = 70 };
         bar.Controls.AddRange(new Control[] {
-            Cap("Auto-joined the colony ·  your share code:"), _hostCode, copyBtn, clearNetBtn });
+            Cap("Auto-joined the colony ·  your share code:"), _hostCode, Flat(copyBtn), Flat(clearNetBtn) });
 
         // GROUP CHAT pane (top) over the network log (bottom)
         var group = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 3 };
-        group.RowStyles.Add(new RowStyle(SizeType.Absolute, 20));
+        group.RowStyles.Add(new RowStyle(SizeType.Absolute, 22));
         group.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        group.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        group.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         group.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         group.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 68));
-        var glbl = new Label { Text = "GROUP CHAT — you + the network's models, round-robin (1 human turn → 1 AI reply). Trains only on human turns.", Dock = DockStyle.Fill };
+        var glbl = Header("GROUP CHAT — you + the network's models, round-robin (1 human turn → 1 AI reply). Trains only on human turns."); glbl.Dock = DockStyle.Fill;
         group.Controls.Add(glbl, 0, 0); group.SetColumnSpan(glbl, 2);
         group.Controls.Add(_groupOut, 0, 1); group.SetColumnSpan(_groupOut, 2);
-        group.Controls.Add(_groupIn, 0, 2); group.Controls.Add(_groupSend, 1, 2);
+        group.Controls.Add(_groupIn, 0, 2); group.Controls.Add(Flat(_groupSend), 1, 2);
 
         var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 360 };
         split.Panel1.Controls.Add(group);
+        var netHdr = Header("network log"); netHdr.Dock = DockStyle.Top;
         split.Panel2.Controls.Add(_netLog);
+        split.Panel2.Controls.Add(netHdr);
 
         root.Controls.Add(bar, 0, 0);
         root.Controls.Add(_netStatus, 0, 1);
