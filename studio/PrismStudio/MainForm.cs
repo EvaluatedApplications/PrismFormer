@@ -56,6 +56,7 @@ public sealed class MainForm : Form
     private readonly Button _trainBtn = new() { Text = "▶ Train", Width = 90 };
     private System.Threading.Timer? _mainSaver;   // periodic checkpoint during the (now open-ended) training run
     private readonly CheckBox _autoClear = new() { Text = "auto-clear/hr", AutoSize = true, Checked = true, Padding = new Padding(6, 6, 0, 0) };
+    private readonly CheckBox _corpusOnly = new() { Text = "corpus-only", AutoSize = true, Checked = false, Padding = new Padding(6, 6, 0, 0) };   // train on data/text alone (mute pairs/chat/group + inbox)
     private System.Threading.Timer? _autoClearTimer;
     private readonly Label _status = new() { Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(8, 0, 0, 0), Font = new Font("Consolas", 9) };
     private readonly TextBox _log = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 9), BackColor = Color.FromArgb(24, 24, 28), ForeColor = Color.Gainsboro };
@@ -130,6 +131,7 @@ public sealed class MainForm : Form
         _hostCode.BackColor = ClPane; _hostCode.ForeColor = ClAccent; _hostCode.BorderStyle = BorderStyle.FixedSingle;
         foreach (var st in new[] { _status, _netStatus, _subStatus }) { st.BackColor = ClChrome; st.ForeColor = ClMuted; }
         _autoClear.ForeColor = ClMuted;
+        _corpusOnly.ForeColor = ClMuted;
     }
 
     public MainForm()
@@ -178,7 +180,7 @@ public sealed class MainForm : Form
         var bar = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = false, AutoScroll = true, BackColor = ClChrome };
         var openBtn = new Button { Text = "Open data folder", Width = 120 };
         var clearBtn = new Button { Text = "Clear log", Width = 70 };
-        bar.Controls.AddRange(new Control[] { Flat(_trainBtn, true), Flat(openBtn), Flat(_saveBtn), Flat(_loadBtn), Flat(_resetBtn), Flat(clearBtn), _autoClear });
+        bar.Controls.AddRange(new Control[] { Flat(_trainBtn, true), Flat(openBtn), Flat(_saveBtn), Flat(_loadBtn), Flat(_resetBtn), Flat(clearBtn), _autoClear, _corpusOnly });
 
         // REPL (chat) on TOP, training log on BOTTOM — same horizontal split as the Network tab
         var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Horizontal, SplitterDistance = 360 };
@@ -242,6 +244,7 @@ public sealed class MainForm : Form
         };
         clearBtn.Click += (_, _) => _log.Clear();
         _autoClear.CheckedChanged += (_, _) => ToggleAutoClear();
+        _corpusOnly.CheckedChanged += (_, _) => { _model.CorpusOnly = _corpusOnly.Checked; Log(_corpusOnly.Checked ? "[mix] corpus-only ON — next epoch trains data/text alone" : "[mix] corpus-only OFF — volume-weighted mix restored"); };
         _sendBtn.Click += (_, _) => Send();
         _replIn.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; Send(); } };
         _askBtn.Click += (_, _) => Ask();
@@ -257,6 +260,7 @@ public sealed class MainForm : Form
             _trainBtn.Text = "■ Stop"; _trainBtn.BackColor = Color.FromArgb(58, 34, 28); _trainBtn.ForeColor = ClStop; _trainBtn.FlatAppearance.BorderColor = ClStop;
             _saveBtn.Enabled = _loadBtn.Enabled = _resetBtn.Enabled = false;   // Save/Load/Reset contend with the training writer — off while training
             var ct = _trainCts.Token;
+            _model.CorpusOnly = _corpusOnly.Checked;   // honour the toggle at train start (also updated live on CheckedChanged)
             if (!_model.Hosting) EnableShare();   // automatic — training always offers to the swarm
             _mainSaver = new System.Threading.Timer(_ => { try { _model.Save(_savePath); } catch { } }, null, 60000, 60000);   // save every 60s (open-ended run — don't only save on Stop)
             _bleedTimer = new System.Threading.Timer(_ =>

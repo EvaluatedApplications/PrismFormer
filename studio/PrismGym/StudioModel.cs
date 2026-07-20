@@ -36,6 +36,15 @@ public sealed class StudioModel
     public string ChatDir => Path.Combine(DataDir, "chat");   // your REPL conversation → trained WITH its context, own fair share
     public string GroupDir => Path.Combine(DataDir, "group"); // the network group chat → rolling, context-capped, trained as (context → next HUMAN turn)
 
+    /// <summary>Folder sampling weight = source.Count^MixAlpha. 0 = uniform per folder (tiny pools oversampled, the big
+    /// corpus starved — the old behaviour); 1 = fully volume-proportional (corpus dominates). ~0.5 gives the corpus the
+    /// share its volume warrants while a few hundred pairs still get ample ABSOLUTE repetition (few items × small share
+    /// is still many reps each). Tune live and watch the "[mix]" log line for the resulting per-folder shares.</summary>
+    public double MixAlpha { get; set; } = 0.5;
+    /// <summary>When set, train ONLY on the text corpus (data/text): mutes pairs/chat/group/gossip/qa/peer AND the peer
+    /// inbox, so language modelling isn't crowded out by the small high-signal pools. The isolation experiment.</summary>
+    public bool CorpusOnly { get; set; }
+
     readonly object _group = new();
     string _groupBuf = "";                                    // rolling group-chat log, capped at the context window
     string GroupFile => Path.Combine(GroupDir, "group.txt");
@@ -131,8 +140,9 @@ public sealed class StudioModel
     {
         report("loading training data…");
         var corpus = CorpusSource.FromFolders(PrismSpec.Context, _v, CorpusDir);   // load the big corpus ONCE, reuse every epoch (was reloading 53 MB per epoch)
-        if (corpus.Count == 0 && PairSource.FromFolders(PrismSpec.Context, _v, PairsDir, GossipDir).Count == 0 && _inbox.IsEmpty)
-        { report("no training data — add files to data/text or data/pairs"); return; }
+        if (corpus.Count == 0 && (CorpusOnly || (PairSource.FromFolders(PrismSpec.Context, _v, PairsDir, GossipDir).Count == 0 && _inbox.IsEmpty)))
+        { report(CorpusOnly ? "corpus-only: add files to data/text" : "no training data — add files to data/text or data/pairs"); return; }
+        if (CorpusOnly) log("[train] CORPUS-ONLY — training on data/text alone (pairs/chat/group/gossip/peer + inbox muted)");
         report("training…"); log("[train] started");
         // GPU acceleration: build a GpuTrainer once (kernels compile ~1-2s) if a CUDA GPU is present and we're not the
         // relay host. CPU model stays the source of truth (serve/bleed/save read it); the GPU just does fwd+bwd ~10x
@@ -151,26 +161,35 @@ public sealed class StudioModel
         if (corpus.Count > 0) try { var (e0, t0) = corpus.GetExample(rng.NextInt64(corpus.Count)); log($"…{Clean(Tail(_v.Decode(e0)))} ▸ \"{_v.Chr(_snapshot.Predict(e0))}\"  (real \"{_v.Chr(t0)}\")"); } catch { }   // instant: untrained guess
         for (var ep = 0; ep < epochs && !ct.IsCancellationRequested; ep++)
         {
-            // one source PER FOLDER; training draws each folder with EQUAL probability so the 53 MB corpus can't drown the tiny pairs
+            // one source PER FOLDER, then sampled by VOLUME (weight = Count^MixAlpha) so the big corpus gets the share its
+            // size warrants instead of a flat 1/N that let a few dozen chat/group lines punch at the corpus's weight.
             var srcs = new List<(string Name, IJobSource S)>();
             if (corpus.Count > 0) srcs.Add(("text", corpus));
-            var pairsS = PairSource.FromFolders(PrismSpec.Context, _v, PairsDir); if (pairsS.Count > 0) srcs.Add(("pairs", pairsS));
-            var gossipS = PairSource.FromFolders(PrismSpec.Context, _v, GossipDir); if (gossipS.Count > 0) srcs.Add(("gossip", gossipS));
-            var qa = PairSource.ReadFolders(PairsDir, GossipDir);   // the SAME curriculum Q&A, ALSO framed as the REPL/group serve it ("prism: Q\nprism: " → A) so PRISM answers questions in chat (raw lanes above still feed the gym probe / `ask`)
-            if (qa.Count > 0) { var qaChatS = new PairSource(PrismSpec.Context, GroupChat.AsChat(qa), _v); if (qaChatS.Count > 0) srcs.Add(("qa-chat", qaChatS)); }
             var chatText = Directory.Exists(ChatDir) ? string.Concat(Directory.EnumerateFiles(ChatDir, "*.txt").OrderBy(f => f).Select(File.ReadAllText)) : "";
-            var chatS = PairSource.FromChat(PrismSpec.Context, _v, chatText); if (chatS.Count > 0) srcs.Add(("chat", chatS));   // progressive (conversation → your reply) pairs, own fair share
-            var groupS = new PairSource(PrismSpec.Context, GroupChat.Pairs(GroupContext), _v); if (groupS.Count > 0) srcs.Add(("group", groupS));   // network group chat → (context → next HUMAN turn); STOP appended by PairSource
-            var distill = _peerDistill.ToArray();   // peers' personality distilled onto OUR chat contexts — trained exactly like the chat source (context → reply)
-            if (distill.Length > 0) { var distillS = new PairSource(PrismSpec.Context, distill.Select(d => (d.Ctx, d.Reply)), _v); if (distillS.Count > 0) srcs.Add(("peer", distillS)); }
+            if (!CorpusOnly)
+            {
+                var pairsS = PairSource.FromFolders(PrismSpec.Context, _v, PairsDir); if (pairsS.Count > 0) srcs.Add(("pairs", pairsS));
+                var gossipS = PairSource.FromFolders(PrismSpec.Context, _v, GossipDir); if (gossipS.Count > 0) srcs.Add(("gossip", gossipS));
+                var qa = PairSource.ReadFolders(PairsDir, GossipDir);   // the SAME curriculum Q&A, ALSO framed as the REPL/group serve it ("prism: Q\nprism: " → A) so PRISM answers questions in chat (raw lanes above still feed the gym probe / `ask`)
+                if (qa.Count > 0) { var qaChatS = new PairSource(PrismSpec.Context, GroupChat.AsChat(qa), _v); if (qaChatS.Count > 0) srcs.Add(("qa-chat", qaChatS)); }
+                var chatS = PairSource.FromChat(PrismSpec.Context, _v, chatText); if (chatS.Count > 0) srcs.Add(("chat", chatS));   // progressive (conversation → your reply) pairs, own fair share
+                var groupS = new PairSource(PrismSpec.Context, GroupChat.Pairs(GroupContext), _v); if (groupS.Count > 0) srcs.Add(("group", groupS));   // network group chat → (context → next HUMAN turn); STOP appended by PairSource
+                var distill = _peerDistill.ToArray();   // peers' personality distilled onto OUR chat contexts — trained exactly like the chat source (context → reply)
+                if (distill.Length > 0) { var distillS = new PairSource(PrismSpec.Context, distill.Select(d => (d.Ctx, d.Reply)), _v); if (distillS.Count > 0) srcs.Add(("peer", distillS)); }
+            }
             if (srcs.Count == 0) break;
+            // VOLUME-WEIGHTED folder mix: weight ∝ Count^MixAlpha. Recomputed per epoch (pools grow via bleed); logged once.
+            var mixW = srcs.Select(x => Math.Pow(Math.Max(1, x.S.Count), MixAlpha)).ToArray();
+            var mixSum = mixW.Sum();
+            if (ep == 0) log($"[mix] alpha={MixAlpha:0.##}  " + string.Join("  ", srcs.Select((x, i) => $"{x.Name} {mixW[i] / mixSum:P0}")));
+            int PickSrc() { var r = rng.NextDouble() * mixSum; double a = 0; for (var i = 0; i < mixW.Length; i++) { a += mixW[i]; if (r <= a) return i; } return mixW.Length - 1; }
             var epStart = sw.Elapsed.TotalSeconds;
             while (!ct.IsCancellationRequested && sw.Elapsed.TotalSeconds - epStart < epochSecs)
             {
                 var bsz = Math.Min(maxBatch, warm); warm = Math.Min(maxBatch, warm * 2);   // warmup ramp: 4, 8, 16, … → maxBatch
                 var batch = new List<(int[] Ctx, int Target)>(bsz);
-                for (var i = 0; i < bsz; i++) { var s = srcs[rng.Next(srcs.Count)].S; batch.Add(s.GetExample(rng.NextInt64(s.Count))); }   // BALANCED: pick a folder uniformly, then an example — each folder gets a fair share
-                var drained = 0; while (drained < 32 && _inbox.TryDequeue(out var ex2)) { batch.Add(ex2); drained++; }   // network-fed learning
+                for (var i = 0; i < bsz; i++) { var s = srcs[PickSrc()].S; batch.Add(s.GetExample(rng.NextInt64(s.Count))); }   // VOLUME-WEIGHTED: folder ∝ Count^MixAlpha (see the [mix] log), then an example
+                if (!CorpusOnly) { var drained = 0; while (drained < 32 && _inbox.TryDequeue(out var ex2)) { batch.Add(ex2); drained++; } }   // network-fed learning (muted in corpus-only)
                 if (batch.Count == 0) break;
                 var bt0 = sw.Elapsed.TotalSeconds;
                 lock (_write)
