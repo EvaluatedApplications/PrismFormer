@@ -16,6 +16,23 @@ using PrismFormer.Bench;
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 
 try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+
+// ---- artifact tee: mirror this bench's console output to <root>\artifacts\<benchname>-last.txt (last run wins) ----
+var __originalOut = Console.Out;
+StreamWriter? __artifactWriter = null;
+try
+{
+    var __benchName = DeriveBenchName(args);
+    var __artifactDir = Path.Combine(FindRepoRoot(), "artifacts");
+    Directory.CreateDirectory(__artifactDir);
+    __artifactWriter = new StreamWriter(Path.Combine(__artifactDir, __benchName + "-last.txt"), append: false) { AutoFlush = true };
+    __artifactWriter.WriteLine($"# {__benchName}  run {DateTime.Now:yyyy-MM-dd HH:mm:ss}  args: {string.Join(' ', args)}");
+    Console.SetOut(new TeeTextWriter(__originalOut, __artifactWriter));
+}
+catch { __artifactWriter = null; }
+
+try
+{
 var epochs = 150; var hi = 12;
 int? seedsArg = null, stepsArg = null, maxNArg = null;   // optional --seeds / --steps / --maxN overrides (--columnar, --capacity; smoke vs full sweep)
 for (var i = 0; i < args.Length - 1; i++)
@@ -204,5 +221,52 @@ Console.WriteLine($"  copy        held-out (algorithmic)         : transformer {
 Console.WriteLine($"  relational  train    (memorised forward)   : transformer {RelTrain(xf.Predict):P1}   prismformer {RelTrain(alg.Predict):P1}");
 Console.WriteLine($"  relational  held-out (inferable reverse)   : transformer {RelHeld(xf.Predict):P1}   prismformer {RelHeld(alg.Predict):P1}");
 Console.WriteLine($"\n  => on UNSEEN operands PrismFormer generalises {(algC >= xfC ? "BETTER" : "worse")} on compute by {(algC - xfC) * 100:+0.0;-0.0} points, pound-for-pound.");
+
+}
+finally
+{
+    try { Console.Out.Flush(); } catch { }
+    if (__artifactWriter != null) { try { __artifactWriter.Flush(); __artifactWriter.Dispose(); } catch { } }
+    Console.SetOut(__originalOut);
+}
+
+// derive a stable artifact name from the primary flag (mirrors the dispatch order above); --tuned-baseline -> "-tuned" suffix
+static string DeriveBenchName(string[] a)
+{
+    string[] flags = { "--sample", "--gradcheck", "--profile", "--spec", "--upgrade-lm", "--upgrade",
+        "--vision", "--spectral", "--spectral-seq", "--vision-codec", "--hash", "--assoc", "--crack", "--crack-faces",
+        "--lesion", "--colony", "--diverse", "--plasticity", "--emergence", "--mesh", "--collapse", "--average",
+        "--swarmdemo", "--swarmconverge", "--avgconverge", "--codec-baseline", "--imgcompose", "--imggen", "--imgtext",
+        "--revinfer", "--collatz", "--prototype", "--distinguish", "--speck", "--inspect", "--columnar", "--capacity",
+        "--extrap", "--lm", "--scale" };
+    var name = "multitask";
+    foreach (var f in flags) if (a.Contains(f)) { name = f.Substring(2); break; }
+    if (name == "multitask" && a.Contains("--legacy")) name = "legacy";
+    if (a.Contains("--tuned-baseline")) name += "-tuned";
+    return name;
+}
+
+// walk up from the running binary to the repo root (marker: PrismFormer.slnx, then .git, else cwd)
+static string FindRepoRoot()
+{
+    for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
+        if (File.Exists(Path.Combine(d.FullName, "PrismFormer.slnx"))) return d.FullName;
+    for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
+        if (Directory.Exists(Path.Combine(d.FullName, ".git"))) return d.FullName;
+    return Directory.GetCurrentDirectory();
+}
+
+// forwards every write to two writers (real console + artifact file); never owns/closes them
+sealed class TeeTextWriter : System.IO.TextWriter
+{
+    readonly System.IO.TextWriter _a, _b;
+    public TeeTextWriter(System.IO.TextWriter a, System.IO.TextWriter b) { _a = a; _b = b; }
+    public override System.Text.Encoding Encoding => _a.Encoding;
+    public override void Write(char value) { _a.Write(value); _b.Write(value); }
+    public override void Write(string? value) { _a.Write(value); _b.Write(value); }
+    public override void Write(char[] buffer, int index, int count) { _a.Write(buffer, index, count); _b.Write(buffer, index, count); }
+    public override void WriteLine(string? value) { _a.WriteLine(value); _b.WriteLine(value); }
+    public override void Flush() { _a.Flush(); _b.Flush(); }
+}
 
 internal readonly record struct Inst(string Task, string[] Prompt, string Target);

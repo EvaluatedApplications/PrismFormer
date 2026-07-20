@@ -18,6 +18,22 @@ using PrismFormer;
 //    stun                      discover this machine's public UDP endpoint via free public STUN
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════════════
 
+// ---- artifact tee: mirror this run's console output to <root>\artifacts\<benchname>-last.txt (last run wins) ----
+var __originalOut = Console.Out;
+StreamWriter? __artifactWriter = null;
+try
+{
+    var __benchName = args.Length >= 1 ? args[0] : "selftest";
+    var __artifactDir = Path.Combine(FindRepoRoot(), "artifacts");
+    Directory.CreateDirectory(__artifactDir);
+    __artifactWriter = new StreamWriter(Path.Combine(__artifactDir, __benchName + "-last.txt"), append: false) { AutoFlush = true };
+    __artifactWriter.WriteLine($"# {__benchName}  run {DateTime.Now:yyyy-MM-dd HH:mm:ss}  args: {string.Join(' ', args)}");
+    Console.SetOut(new TeeTextWriter(__originalOut, __artifactWriter));
+}
+catch { __artifactWriter = null; }
+
+try
+{
 if (args.Length >= 1 && args[0] == "swarmtest") { SwarmTest.Run(args.Length >= 2 ? int.Parse(args[1]) : 3); return; }
 if (args.Length >= 1 && args[0] == "swarmtasks") { SwarmTasks.Run(args.Length >= 2 ? int.Parse(args[1]) : 4); return; }
 if (args.Length >= 1 && args[0] == "sizes") { SizeReport.Run(); return; }
@@ -84,6 +100,37 @@ var data = Net.MakeData(256);
 }
 
 Console.WriteLine("\nMultiple slaves, elastic: workers come and go; each round merges whoever's present, exactly.");
+
+}
+finally
+{
+    try { Console.Out.Flush(); } catch { }
+    if (__artifactWriter != null) { try { __artifactWriter.Flush(); __artifactWriter.Dispose(); } catch { } }
+    Console.SetOut(__originalOut);
+}
+
+// walk up from the running binary to the repo root (marker: PrismFormer.slnx, then .git, else cwd)
+static string FindRepoRoot()
+{
+    for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
+        if (File.Exists(Path.Combine(d.FullName, "PrismFormer.slnx"))) return d.FullName;
+    for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
+        if (Directory.Exists(Path.Combine(d.FullName, ".git"))) return d.FullName;
+    return Directory.GetCurrentDirectory();
+}
+
+// forwards every write to two writers (real console + artifact file); never owns/closes them
+sealed class TeeTextWriter : System.IO.TextWriter
+{
+    readonly System.IO.TextWriter _a, _b;
+    public TeeTextWriter(System.IO.TextWriter a, System.IO.TextWriter b) { _a = a; _b = b; }
+    public override System.Text.Encoding Encoding => _a.Encoding;
+    public override void Write(char value) { _a.Write(value); _b.Write(value); }
+    public override void Write(string? value) { _a.Write(value); _b.Write(value); }
+    public override void Write(char[] buffer, int index, int count) { _a.Write(buffer, index, count); _b.Write(buffer, index, count); }
+    public override void WriteLine(string? value) { _a.WriteLine(value); _b.WriteLine(value); }
+    public override void Flush() { _a.Flush(); _b.Flush(); }
+}
 
 static class Net
 {
