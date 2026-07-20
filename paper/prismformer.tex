@@ -66,10 +66,11 @@ evaluated read-only during backpropagation, gradients accumulate into a detached
 split into shards and summed is \textbf{bit-for-bit identical} to the serial result, which I verify to the
 bit. That merge property is the foundation a \textbf{full-replication training swarm} would stand on,
 every node holding the whole model on a plain CPU and staying coherent across mismatched hardware, but I
-show the property and simulate the coupling in a single process here, not a live multi-node run. In that
-single-process setting skill does spread without a coordinator: independently-initialised nodes share
-what they have learned through continuous weight coupling, near-losslessly with the shared codec ($99\%$
-versus $75\%$ cross-init transfer).
+show it on one machine here, in process and over loopback sockets: the merged run converges
+bit-identically to single-machine training (identical loss, accuracy and weights at every step), and skill
+spreads without a coordinator, independently-initialised nodes share what they have learned through
+continuous weight coupling, near-losslessly with the shared codec ($99\%$ versus $75\%$ cross-init
+transfer). A geo-distributed run at scale is future work.
 
 I report results honestly and reproducibly, against a parameter-matched dense transformer at each
 setting. Arithmetic emerges from the codec with \textbf{no training} (binding two number faces decodes
@@ -181,8 +182,9 @@ opposite design to sharded systems such as Petals \parencite{borzunov2023petals}
 across matched accelerators and lose it if a peer drops. And skill spreads without a coordinator: in a
 single process that simulates the mesh coupling I show independently-initialised nodes sharing what they
 have learned through continuous weight coupling, near-losslessly when they share the codec's coordinate
-system ($99\%$ versus $75\%$). Every experiment here is single-process, so I present this as a proven
-merge-and-share property plus the architecture it enables, and flag the live multi-node run as future
+system ($99\%$ versus $75\%$). Every experiment here runs on one machine, in process or over loopback
+sockets, so I present this as a proven merge-and-share property plus the architecture it enables, and flag
+the geo-distributed run at scale as future
 work (Section~\ref{sec:lim}).
 \end{enumerate}
 
@@ -676,9 +678,37 @@ byte-identical to the master, while a model trained on \emph{copy} alone stays n
 three: it acquired skills it never saw data for, purely from the merged step. And the master's weights are
 \textbf{bit-identical} (max absolute parameter difference $0.0$) to a single-process model trained on the
 union of the four shards in the same order, so the four-way split is lossless, not approximate. This is
-the merge property made concrete across separate instances, not just a checksum. It is still a single
-process (a live multi-node run is future work, Section~\ref{sec:lim}; the over-the-wire bit-exact version
-runs in \code{PrismNet swarmtest}). Run \code{dotnet run --project bench -c Release -- --swarmdemo}.
+the merge property made concrete across separate instances, not just a checksum.
+
+The merge holds along the whole training trajectory, not only at the end. Running the same shards as a
+merged swarm and as a single-process reference in lockstep, the swarm's loss, held-out accuracy, \emph{and
+its parameters} match the reference at every checkpoint, to the bit:
+
+\begin{center}
+\begin{tabular}{@{}rccc@{}}
+\toprule
+round & swarm loss / single-proc & swarm acc / single-proc & max param diff \\
+\midrule
+0   & $3.428$ / $3.428$ & $38.1\%$ / $38.1\%$ & $0.0$ \\
+100 & $0.870$ / $0.870$ & $74.8\%$ / $74.8\%$ & $0.0$ \\
+300 & $0.018$ / $0.018$ & $98.6\%$ / $98.6\%$ & $0.0$ \\
+600 & $0.007$ / $0.007$ & $99.8\%$ / $99.8\%$ & $0.0$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Loss falls to a floor and accuracy rises to $99.8\%$ over $600$ merge rounds, and the two columns are the
+same number in every row: the swarm run is not merely close to single-machine training, it \textbf{is}
+single-machine training step for step, because a lossless gradient sum has no drift to accumulate. And it
+survives leaving the process: with one host and several worker cells over real (loopback) TCP sockets, the
+swarm's loss tracks a single-node reference to four decimals at every round ($3.46\to2.08$), the final
+model is bit-identical to that reference, and every worker cell is byte-identical to every other. So the
+merge is demonstrated in-process, across separate instances, along the full convergence curve, and over
+sockets. What is left is the genuinely \emph{distributed} systems claim, a geo-distributed run across
+mismatched unreliable machines with a wall-clock scaling curve, and a measured comparison against ordinary
+asynchronous approximate merging, which stay future work (Section~\ref{sec:lim}). Run
+\code{dotnet run --project bench -c Release -- --swarmdemo} (and \code{--swarmconverge}), and
+\code{PrismNet swarmtest} for the over-sockets version.
 
 \subsection{The codec-seeded baseline control}\label{sec:codecbaseline}
 
@@ -842,12 +872,15 @@ $49.1\%$ for the untuned baseline and $65.9\%$ for PrismFormer: tuning the basel
 points and does not close the gap. What I still do not compare against is existing complex-valued and
 VSA / neuro-symbolic models, which is needed before the architectural claim is fully settled.
 
-\textbf{The swarm, actually distributed.} I show that sharded gradients merge bit-for-bit, that the
-mechanism runs, and that skill spreads across independently-initialised nodes through continuous coupling
-(Section~\ref{sec:skillshare}), but every experiment here is single-process. A genuine multi-node run,
-with a convergence curve, a fault-injection test, and a wall-clock scaling measurement, is future work;
-until it exists, the swarm should be read as a demonstrated \emph{merge-and-share property} plus an
-\emph{architecture}, not a demonstrated distributed-training result. The value of bit-exactness over ordinary asynchronous
+\textbf{The swarm: property and convergence curve shown, distribution at scale not.} I show that sharded
+gradients merge bit-for-bit, that the merged run converges bit-identically to single-machine training
+along the whole curve, in-process and over loopback TCP (Section~\ref{sec:exactmerge}), and that skill
+spreads across independently-initialised nodes through continuous coupling (Section~\ref{sec:skillshare}).
+What every experiment shares is that it runs on one machine. A genuine \emph{geo-distributed} run across
+mismatched, unreliable machines, with a wall-clock scaling curve and a fault-injection test at real
+network scale, is future work; until it exists, the swarm should be read as a demonstrated
+\emph{merge-and-share property with a matching convergence curve} plus an \emph{architecture}, not a
+demonstrated at-scale distributed-training result. The value of bit-exactness over ordinary asynchronous
 approximate merging is likewise something I argue for but have not yet measured.
 
 \textbf{The homomorphism does not extrapolate, and that narrows the thesis.} Within the trained range
