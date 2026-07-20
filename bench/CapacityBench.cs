@@ -92,7 +92,7 @@ public static class CapacityBench
         var warm = Math.Max(10, passes / 20);
         double LrTuned(int ep) { const double peak = 2e-3; if (ep <= warm) return peak * ep / warm; var t = (ep - warm) / (double)Math.Max(1, passes - warm); return peak * (0.05 + 0.95 * 0.5 * (1 + Math.Cos(Math.PI * t))); }
 
-        var Ns = new List<int>(); for (var n = 32; n <= maxN; n *= 2) Ns.Add(n);
+        var Ns = new List<int>(); for (var n = 32; n <= maxN; n += 32) Ns.Add(n);   // LINEAR steps (not geometric): capacity should scale linearly, no need to chase a huge ceiling
         var curveP = new List<(int N, double r)>(); var curveX = new List<(int N, double r)>();
 
         Console.WriteLine("recall on the stored facts (memorisation) --------------------------------------");
