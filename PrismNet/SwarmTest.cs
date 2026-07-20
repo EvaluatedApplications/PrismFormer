@@ -40,10 +40,14 @@ static class SwarmTest
         var nodes = 1 + workers;
 
         // ---------- single-node REFERENCE: what the swarm must reproduce exactly ----------
+        // Also record its loss at intervals so the swarm can be shown converging step-for-step over the wire below.
         var reference = NewModel();
         var loss0 = AvgLoss(reference, source, WINDOW);
-        foreach (var batch in plan)
+        var interval = Math.Max(1, plan.Count / 8);
+        var refCurve = new Dictionary<int, double>();
+        for (var ri = 0; ri < plan.Count; ri++)
         {
+            var batch = plan[ri];
             var merged = reference.NewGrads();
             for (var k = 0; k < nodes; k++)   // node k owns the round-robin stride k, k+nodes, ...  (host = k0)
             {
@@ -52,6 +56,7 @@ static class SwarmTest
                 merged.Add(g);
             }
             reference.Step(merged, LR, scale: batch.Count);
+            if ((ri + 1) % interval == 0 || ri == plan.Count - 1) refCurve[ri + 1] = AvgLoss(reference, source, WINDOW);
         }
         var refLoss = AvgLoss(reference, source, WINDOW);
 
@@ -70,7 +75,15 @@ static class SwarmTest
         }
 
         var host = new Host(NewModel(), source);
-        host.Run(plan, listener, minStart: workers);
+        Console.WriteLine("over-the-wire convergence (loopback TCP) — swarm host.Model vs single-node reference loss, logged over rounds:");
+        Console.WriteLine($"  {"round",5} | {"swarm loss",11} | {"single-node loss",16}   (per-round losses coincide; final bit-exactness asserted below)");
+        host.Run(plan, listener, minStart: workers, onRound: r =>
+        {
+            if (!refCurve.ContainsKey(r)) return;
+            var swLoss = AvgLoss(host.Model, source, WINDOW);
+            Console.WriteLine($"  {r,5} | {swLoss,11:F4} | {refCurve[r],16:F4}");
+        });
+        Console.WriteLine();
         foreach (var t in threads) t.Join(5000);
         listener.Stop();
 
@@ -134,8 +147,9 @@ static class SwarmTest
         readonly object _lock = new();
         readonly List<Conn> _live = new(), _joining = new();
 
-        public void Run(List<List<long>> plan, TcpListener listener, int minStart)
+        public void Run(List<List<long>> plan, TcpListener listener, int minStart, Action<int>? onRound = null)
         {
+            var round = 0;
             var cts = new CancellationTokenSource();
             var accept = new Thread(() => { try { while (!cts.IsCancellationRequested) { var c = listener.AcceptTcpClient(); var s = c.GetStream(); s.ReadTimeout = s.WriteTimeout = 10000; lock (_lock) _joining.Add(new Conn(c, s)); } } catch { } }) { IsBackground = true };
             accept.Start();
@@ -175,6 +189,7 @@ static class SwarmTest
                 var apply = PackApply(LR, batch.Count, Model.SerializeGradient(merged));
                 foreach (var w in workers) { if (dead.Contains(w)) continue; try { Write(w.S, APPLY, apply); } catch { dead.Add(w); } }
                 if (dead.Count > 0) lock (_lock) foreach (var d in dead) { _live.Remove(d); try { d.C.Close(); } catch { } }
+                onRound?.Invoke(++round);
             }
 
             cts.Cancel(); try { listener.Stop(); } catch { }

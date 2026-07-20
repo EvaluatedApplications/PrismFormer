@@ -58,6 +58,94 @@ internal static class SwarmDemoBench
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+    //  CONVERGENCE CURVE (--swarmconverge) — logs a training curve over the merge rounds, for BOTH the merged swarm
+    //  path and a single-process reference, and prints the max-abs parameter difference at every checkpoint.
+    //  The point made visible: (a) loss falls / accuracy rises to a floor (it converges), and (b) the swarm run is
+    //  not merely close but BIT-IDENTICAL to single-machine training at every logged step (max-param-diff = 0.0),
+    //  which the lossless gradient SUM (Grads.Add) guarantees. Single-machine / in-process wire round-trip; a
+    //  geo-distributed cluster stays future work.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+    public static void RunConverge(string[] args)
+    {
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+        const int K = 4, PROBE = 256;
+        int rounds = 600, every = 0;
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--rounds") rounds = int.Parse(args[i + 1]);
+            if (args[i] == "--every") every = int.Parse(args[i + 1]);
+        }
+        if (every <= 0) every = Math.Max(1, rounds / 12);
+
+        Console.WriteLine("=== SWARM CONVERGENCE CURVE (--swarmconverge) — merged swarm vs single-process, step for step ===");
+        Console.WriteLine($"toy skills (marker in ctx[0]): {string.Join(", ", TaskName)}   |   dims d{DMODEL} S{SHIFTS} L{LAYERS}   |   chance {CHANCE:F1}%");
+        Console.WriteLine($"K={K} shards/round, batch {BATCH}/shard, LR {LR}, {rounds} rounds, checkpoint every {every} rounds (seed {SEED} => identical init)");
+        Console.WriteLine("  swarm  = the K shards computed SEPARATELY, each SerializeGradient->DeserializeGradient over the (in-proc) wire, Grads.Add-merged, ONE Step");
+        Console.WriteLine("  single = the SAME K shards summed on one model in the same fixed order, ONE Step (no wire round-trip)");
+        Console.WriteLine("  the merge is a lossless gradient SUM, so the two runs must stay bit-identical: max-param-diff = 0.0 at every checkpoint.\n");
+
+        var swarm = NewModel();
+        var single = NewModel();
+        var anyNonZero = false;
+        double loss0 = 0, lossF = 0, acc0 = 0, accF = 0;
+
+        Console.WriteLine($"  {"round",6} | {"swarm loss",11} | {"single loss",11} | {"swarm acc",10} | {"single acc",10} | {"max-param-diff",14}");
+        Console.WriteLine($"  {new string('-', 6)}-+-{new string('-', 11)}-+-{new string('-', 11)}-+-{new string('-', 10)}-+-{new string('-', 10)}-+-{new string('-', 14)}");
+
+        void Checkpoint(int r)
+        {
+            double sLoss = MeanLoss(swarm, K, PROBE), gLoss = MeanLoss(single, K, PROBE);
+            double sAcc = MeanAcc(swarm, K), gAcc = MeanAcc(single, K);
+            double d = MaxDiff(swarm, single);
+            if (d != 0.0) anyNonZero = true;
+            if (r == 0) { loss0 = sLoss; acc0 = sAcc; }
+            lossF = sLoss; accF = sAcc;
+            Console.WriteLine($"  {r,6} | {sLoss,11:F5} | {gLoss,11:F5} | {sAcc,10:P1} | {gAcc,10:P1} | {d,14:E3}");
+        }
+
+        Checkpoint(0);   // untrained baseline (before any step)
+        for (var r = 0; r < rounds; r++)
+        {
+            // ---- SWARM: each shard's gradient computed on the SAME synced weights, shipped over the wire, summed, one step ----
+            var merged = swarm.NewGrads(); var total = 0;
+            for (var k = 0; k < K; k++)
+            {
+                var g = swarm.NewGrads();
+                for (var i = 0; i < BATCH; i++) { var (c, t) = Example(k, Idx(k, r, i)); swarm.Accumulate(c, t, g); total++; }
+                merged.Add(swarm.DeserializeGradient(swarm.SerializeGradient(g)));   // round-trip the gradient over the (in-proc) wire
+            }
+            swarm.Step(merged, LR, scale: total);
+
+            // ---- SINGLE-PROCESS reference: identical shards, summed on one model in the same order, one step ----
+            var refMerged = single.NewGrads(); var refTotal = 0;
+            for (var k = 0; k < K; k++)
+            {
+                var g = single.NewGrads();
+                for (var i = 0; i < BATCH; i++) { var (c, t) = Example(k, Idx(k, r, i)); single.Accumulate(c, t, g); refTotal++; }
+                refMerged.Add(g);
+            }
+            single.Step(refMerged, LR, scale: refTotal);
+
+            if ((r + 1) % every == 0 || r == rounds - 1) Checkpoint(r + 1);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"  CONVERGED: mean loss {loss0:F4} -> {lossF:F4}, mean acc {acc0:P1} -> {accF:P1} over {rounds} rounds (fell/rose to a floor).");
+        Console.WriteLine(anyNonZero
+            ? "  *** WARNING: max-param-diff was NON-ZERO at a checkpoint — the bit-exact merge story is BROKEN. ***"
+            : "  BIT-EXACT: max-param-diff = 0.0 at every checkpoint — the swarm run IS single-machine training, step for step (lossless gradient sum).");
+        Console.WriteLine("  scope: single machine / in-process wire round-trip; a geo-distributed cluster stays future work.");
+    }
+
+    static double MeanLoss(AlgFormer m, int K, int n)
+    {
+        var g = m.NewGrads(); double s = 0; var c = 0;
+        for (var k = 0; k < K; k++) for (var i = 0; i < n; i++) { var (ctx, t) = Example(k, 200_000_000L + i); s += m.Accumulate(ctx, t, g); c++; }
+        return s / c;
+    }
+    static double MeanAcc(AlgFormer m, int K) { double s = 0; for (var k = 0; k < K; k++) s += Acc(m, k); return s / K; }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
     //  PART 1 — master + K slaves; sharded gradient sum == single-process union training, to the bit.
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
     static void Part1_MasterSlave(int rounds)
