@@ -786,6 +786,30 @@ bleed as a before/after matrix: two shared-init specialists (copy at $100\%$ / m
 mirror) elastic-average into two generalists that each gain the other's skill ($12\to94\%$ and
 $25\to88\%$) as their weights collapse together (divergence $0.27\to0.008$).
 
+That consensus has a trajectory, and it is worth laying beside the exact-merge curve, because the two
+swarm mechanisms converge in \emph{different} senses. Coupling the two specialists and logging over rounds,
+the divergence between them falls to a small floor while each node's \emph{other}-skill accuracy climbs:
+
+\begin{center}
+\begin{tabular}{@{}rccc@{}}
+\toprule
+round & divergence(A,B) & A's other-skill & B's other-skill \\
+\midrule
+0   & $0.270$ & $12.5\%$ & $25.0\%$ \\
+300 & $0.031$ & $27.1\%$ & $59.0\%$ \\
+600 & $0.009$ & $84.6\%$ & $44.9\%$ \\
+900 & $0.008$ & $93.8\%$ & $87.9\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The contrast with the gradient-sum curve (Section~\ref{sec:exactmerge}) is the point. Gradient summing is a
+lossless \emph{sum}, so the merged run is bit-identical to single-machine (max param diff $0.0$); weight
+averaging is a lossy \emph{consensus}, so the divergence shrinks toward a small \emph{nonzero} floor
+($0.008$, not $0$) while skill bleeds across ($12.5\to93.8\%$ and $25\to87.9\%$). Both converge: one to the
+same bits, the other to a shared, near-lossless middle. Run
+\code{dotnet run --project bench -c Release -- --avgconverge}.
+
 \subsection{Reverse inference, recovered}\label{sec:revinfer}
 
 The reverse-inference failure of Section~\ref{sec:relational} (train ``opposite of A = B'', hold out
