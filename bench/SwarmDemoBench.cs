@@ -146,6 +146,71 @@ internal static class SwarmDemoBench
     static double MeanAcc(AlgFormer m, int K) { double s = 0; for (var k = 0; k < K; k++) s += Acc(m, k); return s / K; }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+    //  AVERAGING CONVERGENCE CURVE (--avgconverge) — the OTHER swarm mechanism. Where gradient summing is a lossless
+    //  SUM that converges bit-identically to single-machine (--swarmconverge, diff 0.0), elastic WEIGHT-AVERAGING
+    //  (pull-to-mean / EASGD coupling) converges toward CONSENSUS: two specialists are dragged toward each other and
+    //  each other's skill bleeds in — but the merge is lossy, so divergence(A,B) falls to a small NONZERO floor, not
+    //  to 0. Two nodes A (copy0 only) and B (max only), shared init (same basin, dodges linear-mode-connectivity),
+    //  briefly warmed up to specialize apart, then coupled throughout. Logs divergence + each node's own+other-skill
+    //  accuracy over the coupling rounds. Contrast with the gradient-sum curve is printed explicitly.
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+    public static void RunAvgConverge(string[] args)
+    {
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+        const int skillA = 0, skillB = 2;        // copy0 vs max — clearly separable
+        const int H = 15; const double alpha = 0.5;
+        int warm = 300, rounds = 900, every = 0;
+        for (var i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--rounds") rounds = int.Parse(args[i + 1]);
+            if (args[i] == "--warm") warm = int.Parse(args[i + 1]);
+            if (args[i] == "--every") every = int.Parse(args[i + 1]);
+        }
+        if (every <= 0) every = Math.Max(1, rounds / 12);
+
+        Console.WriteLine("=== AVERAGING CONVERGENCE CURVE (--avgconverge) — elastic weight-averaging converges toward CONSENSUS (lossy, NOT bit-exact) ===");
+        Console.WriteLine($"node A trains ONLY {TaskName[skillA]}, node B trains ONLY {TaskName[skillB]}  |  shared init (same basin)  |  dims d{DMODEL} S{SHIFTS} L{LAYERS}  |  chance {CHANCE:F1}%");
+        Console.WriteLine($"{warm} isolated warmup rounds (specialize apart), then pull-to-mean alpha {alpha} every {H} rounds for {rounds} coupled rounds, checkpoint every {every}");
+        Console.WriteLine("  the point: divergence(A,B) SHRINKS toward a small floor (nodes converge toward each other, NOT to 0), and each node's OTHER-skill accuracy RISES (skill bleeds in).");
+        Console.WriteLine("  contrast: gradient summing (--swarmconverge) is a lossless SUM => max-param-diff 0.0 (bit-exact); averaging is a lossy CONSENSUS => divergence small but nonzero.\n");
+
+        var A = NewModel(); var B = NewModel();   // shared init (same seed)
+        for (var r = 0; r < warm; r++) { TrainBatch(A, skillA, r); TrainBatch(B, skillB, r); }   // specialize apart (no coupling yet)
+
+        double div0 = 0, divF = 0, aOther0 = 0, aOtherF = 0, bOther0 = 0, bOtherF = 0;
+
+        Console.WriteLine($"  {"round",6} | {"div(A,B)",9} | {"A:" + TaskName[skillA] + "(own)",14} | {"A:" + TaskName[skillB] + "(other)",14} | {"B:" + TaskName[skillB] + "(own)",14} | {"B:" + TaskName[skillA] + "(other)",14}");
+        Console.WriteLine($"  {new string('-', 6)}-+-{new string('-', 9)}-+-{new string('-', 14)}-+-{new string('-', 14)}-+-{new string('-', 14)}-+-{new string('-', 14)}");
+
+        void Checkpoint(int r)
+        {
+            double div = Divergence(A, B);
+            double aOwn = Acc(A, skillA), aOther = Acc(A, skillB), bOwn = Acc(B, skillB), bOther = Acc(B, skillA);
+            if (r == 0) { div0 = div; aOther0 = aOther; bOther0 = bOther; }
+            divF = div; aOtherF = aOther; bOtherF = bOther;
+            Console.WriteLine($"  {r,6} | {div,9:F4} | {aOwn,14:P1} | {aOther,14:P1} | {bOwn,14:P1} | {bOther,14:P1}");
+        }
+
+        Checkpoint(0);   // starting point: specialists, maximally diverged
+        for (var r = 0; r < rounds; r++)
+        {
+            TrainBatch(A, skillA, warm + r);
+            TrainBatch(B, skillB, warm + r);
+            if ((r + 1) % H == 0) PullToMean(new[] { A, B }, alpha);
+            if ((r + 1) % every == 0 || r == rounds - 1) Checkpoint(r + 1);
+        }
+
+        bool divShrank = divF < div0;
+        bool bled = aOtherF > 2 * CHANCE / 100 && bOtherF > 2 * CHANCE / 100;
+        Console.WriteLine();
+        Console.WriteLine($"  divergence(A,B): {div0:F4} -> {divF:F4}   ({(divShrank ? "SHRANK toward a small floor" : "did NOT shrink")}; floor is nonzero — lossy consensus, not bit-exact)");
+        Console.WriteLine($"  A gained {TaskName[skillB]}: {aOther0:P1} -> {aOtherF:P1}   |   B gained {TaskName[skillA]}: {bOther0:P1} -> {bOtherF:P1}   ({(bled ? "skill BLED in as they converged" : "skill did NOT bleed in")})");
+        if (!divShrank) Console.WriteLine("  *** WARNING: divergence did NOT shrink — the consensus/averaging story did not hold this run. ***");
+        if (!bled) Console.WriteLine("  *** WARNING: cross-skill accuracy stayed near chance — skill did NOT bleed in this run. ***");
+        Console.WriteLine("  vs gradient summing: that path is bit-exact (max-param-diff 0.0, --swarmconverge); this averaging path is a lossy consensus (divergence small but NONZERO).");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
     //  PART 1 — master + K slaves; sharded gradient sum == single-process union training, to the bit.
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────
     static void Part1_MasterSlave(int rounds)
