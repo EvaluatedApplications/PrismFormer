@@ -51,6 +51,7 @@ var tuned = args.Contains("--tuned-baseline");
 if (args.Contains("--sample")) { UpgradeBench.RunSample(args.SkipWhile(a => a != "--sample").Skip(1).ToArray()); return; }   // load checkpoint(s) + greedily generate — trained (coherent) vs fresh (garbage)
 if (args.Contains("--gradcheck")) { UpgradeBench.RunGradcheck(); return; }   // bitwise gradient checksum — must be unchanged by the scratch-reuse refactor
 if (args.Contains("--profile")) { UpgradeBench.RunProfile(); return; }   // training throughput/CPU-utilization/GC profiler (why the CPU doesn't saturate)
+if (args.Contains("--growlayer")) { UpgradeBench.RunGrowLayer(); return; }   // EXPERIMENT: non-destructive layer add (zero-output-projection = identity + live gradient) vs the naive all-zero (dead) control
 if (args.Contains("--spec")) { UpgradeBench.RunSpec(); return; }   // verify a c256 checkpoint LoadUpgrades into the current spec byte-clean (safe to ship the bump)
 if (args.Contains("--upgrade-lm")) { UpgradeBench.RunLm(); return; }   // BENEFIT: train each upgrade config on char LM next-token, held-out accuracy
 if (args.Contains("--upgrade")) { UpgradeBench.Run(); return; }   // perf cost of the expand-in-place upgrades (grow Shifts / grow Context)

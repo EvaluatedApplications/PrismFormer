@@ -295,4 +295,52 @@ public static class UpgradeBench
         Console.WriteLine($"identity check         = max|logit_old - logit_new| over char range = {maxDiff:E3}  (char knowledge must carry over -> ~0)");
         Console.WriteLine(okUp && maxDiff < 1e-9 ? "  PASS — char knowledge carries over byte-clean; new shift/subword rows are identity at init. Safe to ship." : "  FAIL — drift or load error; DO NOT ship the bump.");
     }
+
+    // ── EXPERIMENT: is a LAYER add non-destructive AND trainable? A naive all-zero layer is identity at init but its
+    //    gradient is exactly zero everywhere (ctx=z=0) → DEAD, never trains. Zeroing ONLY the residual output projections
+    //    (Ro, Ao) is also identity at init but ctx/z are nonzero → LIVE gradient, so it trains and can help. This measures
+    //    all of that head-to-head against a same-budget base control (char LM). ──
+    public static void RunGrowLayer()
+    {
+        try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
+        const int vocab = CharVocab.N, S = 48, baseL = 2, ctx = 48; var D = PhasorCodec.Dim; var frozen = PhasorCodec.FrozenReals;
+        var v = new CharVocab();
+        double[] Seed(int w) => PhasorCodec.Encode(v.Symbol(w));
+        int[] Chars(string s) => s.Select(c => c >= 32 && c <= 126 ? c - 32 : 0).ToArray();   // char ids 0..94 (CharVocab.Id), no subwords
+        var corpus = Chars(LoadCorpus(120_000));
+        List<(int[], int)> Draw(int n, int seed) { var r = new Random(seed); return Enumerable.Range(0, n).Select(_ => { var p = ctx + r.Next(corpus.Length - ctx - 1); return (corpus[(p - ctx)..p], corpus[p]); }).ToList(); }
+        var evalSet = Draw(1000, 99);
+        double Loss(AlgFormer m) { double s = 0; foreach (var (c, t) in evalSet) { var lg = m.LogitsFor(c); var mx = lg.Max(); double sum = 0; foreach (var x in lg) sum += Math.Exp(x - mx); s += -(lg[t] - mx - Math.Log(sum)); } return s / evalSet.Count; }
+        double MaxDiff(double[] a, double[] b) { double d = 0; for (var i = 0; i < a.Length; i++) d = Math.Max(d, Math.Abs(a[i] - b[i])); return d; }
+
+        Console.WriteLine($"NON-DESTRUCTIVE LAYER ADD — char LM, base L{baseL} -> L{baseL + 1}   (d{D} S{S} ctx{ctx})   {DateTime.Now:yyyy-MM-dd HH:mm}");
+        var baseM = new AlgFormer(vocab, S, baseL, ctx, D, frozen, Seed, 1);
+        baseM.Train(Draw(4000, 1), 8, batchSize: 64, baseLr: 2e-3, seed: 1);
+        var probe = corpus[200..(200 + ctx)]; var baseLogits = baseM.LogitsFor(probe);
+        Console.WriteLine($"  base trained: eval loss {Loss(baseM):F4}");
+
+        var B = baseM.GrowLayers(1, zeroOutputOnly: true, seed: 7);    // zero ONLY Ro/Ao → identity + LIVE
+        var C = baseM.GrowLayers(1, zeroOutputOnly: false, seed: 7);   // zero the WHOLE layer → identity + DEAD (control)
+        var ctrl = baseM.GrowLayers(0);                                // same params, no new layer → fair same-budget control
+
+        Console.WriteLine("verification (at init):");
+        Console.WriteLine($"    identity  B: max|logit-base| = {MaxDiff(baseLogits, B.LogitsFor(probe)):E2}   C: {MaxDiff(baseLogits, C.LogitsFor(probe)):E2}   (both must be ~0)");
+        Console.WriteLine($"    new-layer output-bank norm  B: {B.OutputBankNorm(baseL):E2}   C: {C.OutputBankNorm(baseL):E2}   (both 0 at init)");
+
+        var phase2 = Draw(4000, 2);
+        B.Train(phase2, 8, batchSize: 64, baseLr: 2e-3, seed: 2);
+        C.Train(phase2, 8, batchSize: 64, baseLr: 2e-3, seed: 2);
+        ctrl.Train(phase2, 8, batchSize: 64, baseLr: 2e-3, seed: 2);
+
+        var bN = B.OutputBankNorm(baseL); var cN = C.OutputBankNorm(baseL);
+        double bl = Loss(B), cl = Loss(C), ctl = Loss(ctrl);
+        Console.WriteLine("after equal-budget training:");
+        Console.WriteLine($"    new-layer output-bank norm  B: {bN:E2} ({(bN > 1e-6 ? "LIVE — it trained" : "DEAD")})   C: {cN:E2} ({(cN > 1e-6 ? "live" : "DEAD — never moved")})");
+        Console.WriteLine($"    eval loss   base+layer(live) {bl:F4}   |  base+layer(dead) {cl:F4}   |  base-only ctrl {ctl:F4}");
+        Console.WriteLine("\nreads:");
+        Console.WriteLine($"  - all-zero layer is a NO-OP: dead norm {cN:E2}, and its loss {cl:F4} ~= base ctrl {ctl:F4} (the layer changed nothing).");
+        Console.WriteLine($"  - zero-output layer is LIVE: norm grew {B.OutputBankNorm(baseL):E2} from 0, loss {bl:F4} vs ctrl {ctl:F4} ({(bl < ctl ? "BETTER — the added depth helped" : "not better this budget")}).");
+        var pass = bN > 1e-6 && cN < 1e-9;
+        Console.WriteLine(pass ? "  VERDICT: non-destructive add works — identity at init, live gradient, trains; the all-zero control is provably dead." : "  VERDICT: unexpected — check the init.");
+    }
 }

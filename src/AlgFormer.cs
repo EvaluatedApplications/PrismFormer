@@ -131,6 +131,42 @@ public sealed class AlgFormer
         _mom.Clear(); _t = 0;
     }
 
+    static IEnumerable<double[][]> Banks(Layer l) { yield return l.Rq; yield return l.Rk; yield return l.Rv; yield return l.Ro; yield return l.A1; yield return l.Ag; yield return l.Ao; }
+    static void ZeroBank(double[][] bank) { foreach (var row in bank) Array.Clear(row); }
+
+    /// <summary>NON-DESTRUCTIVE layer growth. Returns a COPY with <paramref name="extra"/> layers APPENDED. Each new layer
+    /// is the IDENTITY at init (this model's output is preserved byte-for-byte), yet trains from step one — achieved by
+    /// zeroing ONLY the residual output projections (Ro, Ao): then <c>o=0</c> and <c>fz=0</c> give <c>y=X</c> (identity),
+    /// but <c>ctx</c> and <c>z</c> are nonzero (Rq/Rk/Rv/A1/Ag keep their random init), so Ro/Ao receive gradient
+    /// immediately and unlock the rest of the layer. Contrast <paramref name="zeroOutputOnly"/>=false, which zeros the
+    /// WHOLE layer: also identity, but ctx=z=0 makes EVERY bank's gradient exactly zero — a DEAD layer that never trains.
+    /// This is the experiment behind making depth a retrain-free lever like Shifts/Context.</summary>
+    public AlgFormer GrowLayers(int extra, bool zeroOutputOnly = true, int seed = 42)
+    {
+        var m = new AlgFormer(_v, _s, _layers + extra, _maxT, _d, _frozen, embedSeed: null, seed: seed, bindFfn: _bind);
+        for (var w = 0; w < _v; w++) Array.Copy(Emb[w], m.Emb[w], _d);
+        for (var t = 0; t < _maxT; t++) Array.Copy(Pos[t], m.Pos[t], _d);
+        Array.Copy(C, m.C, _v);
+        for (var l = 0; l < _layers; l++)                                    // carry the trained layers over verbatim
+            foreach (var (a, b) in Banks(Ls[l]).Zip(Banks(m.Ls[l]))) for (var k = 0; k < a.Length; k++) Array.Copy(a[k], b[k], _d);
+        for (var l = _layers; l < _layers + extra; l++)                      // init the appended layers
+        {
+            if (zeroOutputOnly) { ZeroBank(m.Ls[l].Ro); ZeroBank(m.Ls[l].Ao); }   // identity + LIVE gradient
+            else foreach (var bank in Banks(m.Ls[l])) ZeroBank(bank);              // identity + DEAD (all-zero control)
+        }
+        return m;
+    }
+
+    /// <summary>L2 norm of a layer's residual OUTPUT projections (Ro + Ao). Zero for a freshly zero-output-initialised
+    /// layer; it becomes nonzero once the layer has received gradient — the liveness test for a non-destructive add.</summary>
+    public double OutputBankNorm(int layer)
+    {
+        double s = 0;
+        foreach (var bank in new[] { Ls[layer].Ro, Ls[layer].Ao })
+            foreach (var row in bank) foreach (var x in row) s += x * x;
+        return Math.Sqrt(s);
+    }
+
     /// <summary>Restore parameters; returns false on a shape mismatch (caller starts fresh).</summary>
     public bool Load(System.IO.BinaryReader r)
     {
