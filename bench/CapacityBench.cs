@@ -10,15 +10,16 @@ namespace PrismFormer.Bench;
 /// (AlgFormer) compete to MEMORISE the most unique atomic facts. We build a key→value STORE with NO structure to
 /// generalise from — each key is a short unique token-sequence over a fixed alphabet and its value is an ARBITRARY
 /// (uniform-random) value token, so nothing can be inferred; every fact must be STORED. We sweep the number of
-/// facts N upward, train BOTH models to memorise all N (equal exposure per fact at every N, so recall fall-off is
-/// pure storage capacity, not budget starvation), then measure recall on those same N facts (this is memorisation,
-/// not held-out — capacity, not generalisation). We report the recall-vs-N curve for both and the "atomic capacity"
-/// = the largest N at ≥95% and at ≥50% recall.
+/// facts N upward and train BOTH models with EARLY-STOP — each runs until it converges to full recall (it fits N) or
+/// plateaus (N exceeds its capacity), which is the truer capacity test than a fixed budget (a fixed budget conflates
+/// how FAST a model learns with how MUCH it can hold). We measure recall on those same N facts (memorisation, not
+/// held-out) and report the recall-vs-N curve plus the "atomic capacity" = the largest N still at ≥95% / ≥50% recall.
 ///
-/// <para>Facts reuse the benches' tokenisation convention: a key is <see cref="KeyLen"/> symbols drawn from a
-/// <see cref="KeyAlphabet"/>-symbol alphabet (so 16^4 = 65536 unique keys are available), followed by "="; the
-/// target is one of <see cref="ValueSet"/> value tokens. The alphabet is FIXED, so vocab and therefore the models'
-/// parameter budget do NOT grow with N — a clean fixed-model capacity measure. Chance recall = 1/ValueSet.</para>
+/// <para>Each key is <see cref="KeyLen"/> atomic symbols over a small alphabet sized so its tuples cover maxN unique
+/// keys, followed by "="; the target is one of <see cref="ValueSet"/> random value tokens. The alphabet stays small and
+/// FIXED, so vocab (hence both models' parameter budget) does NOT grow with N. A single-token key would hand each key
+/// its own embedding (free storage → no real ceiling); shared symbols force the fixed machinery to STORE the map. Every
+/// (N, model) trains as an independent job, all run CONCURRENTLY. Chance recall = 1/ValueSet.</para>
 ///
 /// <para>Parameter-matched at the repo's production convention: AlgFormer at the head-to-head config (dModel=256,
 /// shifts=8, layers=2, frozen identity), the transformer's (d, dff, L) auto-searched to match its ParamCount, using
@@ -27,11 +28,14 @@ namespace PrismFormer.Bench;
 /// </summary>
 public static class CapacityBench
 {
-    const int KeyAlphabet = 16;   // key symbols s0..s15 (hashed phasor signatures — no numeric structure)
-    const int KeyLen = 4;         // key = 4 symbols → 16^4 = 65536 unique keys available
-    const int ValueSet = 256;     // value tokens v0..v255; arbitrary key→value assignment; chance recall = 1/256
+    const int KeyLen = 2;         // MINIMAL keys: 2 atomic symbols. Short, but drawn from a small FIXED alphabet so the
+                                  // vocab (hence both models' parameter budget) stays ~constant as N grows. A single-token
+                                  // key would hand each key its OWN learnable embedding, so the model would grow with N and
+                                  // never saturate (capacity would just track the vocab). Shared symbols force the fixed
+                                  // machinery to STORE the map — which is what makes the capacity ceiling real.
+    const int ValueSet = 256;     // value = 1 of 256 random tokens (v0..v255); arbitrary key→value; chance recall = 1/256
 
-    public static void Run(int maxN = 1024, int passes = 400, bool tuned = true)
+    public static void Run(int maxN = 4096, int passes = 800, bool tuned = true)
     {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
 
@@ -40,7 +44,8 @@ public static class CapacityBench
         var words = new List<string> { "<pad>" };
         int Id(string w) { if (id.TryGetValue(w, out var i)) return i; i = id.Count; id[w] = i; words.Add(w); return i; }
         var eq = Id("=");
-        var keySym = new int[KeyAlphabet]; for (var i = 0; i < KeyAlphabet; i++) keySym[i] = Id($"s{i}");
+        var keyAlphabet = Math.Max(4, (int)Math.Ceiling(Math.Pow(maxN, 1.0 / KeyLen)) + 1);   // smallest alphabet whose KeyLen-tuples cover maxN unique keys → vocab stays tiny even at N in the thousands
+        var keySym = new int[keyAlphabet]; for (var i = 0; i < keyAlphabet; i++) keySym[i] = Id($"s{i}");
         var valSym = new int[ValueSet]; for (var i = 0; i < ValueSet; i++) valSym[i] = Id($"v{i}");
         var vocab = Math.Max(1024, id.Count + 8);
         double[] Seed(int w) => w < words.Count ? PhasorCodec.Encode(words[w]) : new double[PhasorCodec.Dim];
@@ -60,8 +65,8 @@ public static class CapacityBench
         if (!AlgFormer.GradCheck(out var ar) || !MiniTransformer.GradCheck(out var xr, layerNorm: tuned)) { Console.WriteLine("GRADCHECK FAILED — aborting"); return; }
         Console.WriteLine($"gradchecks pass (prism {ar:E1}, transformer{(tuned ? " +LN" : "")} {xr:E1})");
         Console.WriteLine($"params: PrismFormer {targetParams:N0} (d={PhasorCodec.Dim}, S=8, L=2)   transformer {xfParams:N0} (d={best.d}, dff={best.ff}, L={best.L}{(tuned ? ", +LayerNorm" : "")})   ({(double)xfParams / targetParams:F2}x pound-for-pound)");
-        Console.WriteLine($"key = {KeyLen} symbols over a {KeyAlphabet}-symbol alphabet + \"=\"  ·  value = 1 of {ValueSet} tokens (arbitrary, must be stored)  ·  chance recall {1.0 / ValueSet:P1}");
-        Console.WriteLine($"train BOTH to memorise all N facts ({passes} passes each, equal exposure per fact at every N)  ·  vocab {id.Count}\n");
+        Console.WriteLine($"key = {KeyLen} symbols over a {keyAlphabet}-symbol alphabet + \"=\"  ·  value = 1 of {ValueSet} tokens (arbitrary, must be stored)  ·  chance recall {1.0 / ValueSet:P1}  ·  vocab {id.Count} (FIXED as N grows)");
+        Console.WriteLine($"train BOTH with early-stop (cap {passes} passes; stop at convergence or plateau)  ·  concurrent jobs  ·  vocab {id.Count}\n");
 
         // ---- build N arbitrary facts (identical for both models); keys unique, values uniform-random ----
         (int[] key, int val)[] MakeFacts(int N)
@@ -72,7 +77,7 @@ public static class CapacityBench
             while (facts.Count < N)
             {
                 var ks = new int[KeyLen];
-                for (var k = 0; k < KeyLen; k++) ks[k] = r.Next(KeyAlphabet);
+                for (var k = 0; k < KeyLen; k++) ks[k] = r.Next(keyAlphabet);
                 if (!seen.Add(string.Join(',', ks))) continue;   // distinct key sequence
                 var key = new int[KeyLen + 1];
                 for (var k = 0; k < KeyLen; k++) key[k] = keySym[ks[k]];
@@ -88,49 +93,79 @@ public static class CapacityBench
             return ok / (double)facts.Length;
         }
 
-        // tuned transformer LR: warmup→cosine over passes; AlgFormer keeps the shared linear-decay base (its own recipe).
+        // LR schedules run over the pass CAP; an early-stopped job just uses the early part of the curve.
         var warm = Math.Max(10, passes / 20);
         double LrTuned(int ep) { const double peak = 2e-3; if (ep <= warm) return peak * ep / warm; var t = (ep - warm) / (double)Math.Max(1, passes - warm); return peak * (0.05 + 0.95 * 0.5 * (1 + Math.Cos(Math.PI * t))); }
+        double LrBase(int ep) => 2e-3 * (1.0 - 0.9 * (ep - 1) / Math.Max(1, passes - 1));
 
-        var Ns = new List<int>(); for (var n = 32; n <= maxN; n += 32) Ns.Add(n);   // LINEAR steps (not geometric): capacity should scale linearly, no need to chase a huge ceiling
-        var curveP = new List<(int N, double r)>(); var curveX = new List<(int N, double r)>();
+        // Sweep STARTS at 1024 (64..512 were trivially 100%/100% — no signal), steps up to maxN and brackets both ceilings.
+        var Ns = new List<int>(); for (var n = 1024; n <= maxN; n += 512) Ns.Add(n);
+        if (Ns.Count == 0) Ns.Add(maxN);
 
-        Console.WriteLine("recall on the stored facts (memorisation) --------------------------------------");
-        Console.WriteLine($"  {"N facts",8}  {"PrismFormer",12}  {"transformer",12}");
-        foreach (var N in Ns)
+        // EARLY-STOP per model: eval recall every CHECK passes; STOP when it converges (>=DONE ⇒ it fits N) or plateaus
+        // (rises slower than MINGAIN/check for PLATEAU checks ⇒ N exceeds its capacity). No fixed grind. This is MORE
+        // rigorous than a fixed budget: capacity = "can it converge to full recall", not "recall at K passes" (which
+        // conflates speed with capacity). NB: memorisation recall creeps up MONOTONICALLY, so the plateau test must be
+        // a MINIMUM SLOPE (MINGAIN), not "any gain" — a near-zero-tolerance test never fires and every job runs to cap.
+        const int CHECK = 25; const double DONE = 0.98; const int PLATEAU = 3; const double MINGAIN = 0.004;
+        (double r, int ep, bool conv) TrainEarly(Func<int[], int> predict, Action<int[], int, int> step, (int[] key, int val)[] facts)
         {
-            var facts = MakeFacts(N);
-            var alg = new AlgFormer(vocab, shifts: 8, layers: 2, maxContext: ctx, dModel: PhasorCodec.Dim, frozenPrefix: PhasorCodec.FrozenReals, embedSeed: Seed, seed: 1);
-            var xf = new MiniTransformer(vocab, best.d, best.ff, best.L, ctx, 42, layerNorm: tuned);
-
-            // train both identically (same shuffled order each pass); independent models → run side by side
-            void Train(Action<int[], int, double, double> stepAlg, Action<int[], int, double, double> stepXf)
+            double best = 0; int noGain = 0, used = 0;
+            for (var ep = 1; ep <= passes; ep++)
             {
-                for (var ep = 1; ep <= passes; ep++)
+                var order = Enumerable.Range(0, facts.Length).ToArray();
+                var er = new Random(1000 + ep);
+                for (var i = order.Length - 1; i > 0; i--) { var j = er.Next(i + 1); (order[i], order[j]) = (order[j], order[i]); }
+                foreach (var idx in order) { var (key, val) = facts[idx]; step(key, val, ep); }
+                used = ep;
+                if (ep % CHECK == 0 || ep == passes)
                 {
-                    var lr = 2e-3 * (1.0 - 0.9 * (ep - 1) / Math.Max(1, passes - 1));   // shared base schedule
-                    var lx = tuned ? LrTuned(ep) : lr;                                  // transformer: tuned warmup→cosine when on
-                    var order = Enumerable.Range(0, facts.Length).ToArray();
-                    var er = new Random(1000 + ep);
-                    for (var i = order.Length - 1; i > 0; i--) { var j = er.Next(i + 1); (order[i], order[j]) = (order[j], order[i]); }
-                    Parallel.Invoke(
-                        () => { foreach (var idx in order) { var (key, val) = facts[idx]; stepAlg(key, val, lr, ep); } },
-                        () => { foreach (var idx in order) { var (key, val) = facts[idx]; stepXf(key, val, lx, ep); } });
+                    var r = Recall(predict, facts);
+                    if (r >= DONE) return (r, ep, true);
+                    if (r > best + MINGAIN) { best = r; noGain = 0; } else if (++noGain >= PLATEAU) return (Math.Max(best, r), ep, false);
+                    best = Math.Max(best, r);
                 }
             }
-            Train(
-                (key, val, lr, _) => alg.TrainStep(key, val, lr),
-                (key, val, lx, _) => { if (tuned) xf.TrainStep(key, val, lx, 0.9, 0.999, 1e-8); else xf.TrainStep(key, val, lx); });
+            return (best, used, false);
+        }
 
-            var rp = Recall(alg.Predict, facts); var rx = Recall(xf.Predict, facts);
-            curveP.Add((N, rp)); curveX.Add((N, rx));
-            Console.WriteLine($"  {N,8}  {rp,12:P1}  {rx,12:P1}");
+        // ONE job per (N, model-kind); ALL run concurrently to fill the cores (was 2-way Parallel.Invoke, sequential N).
+        var jobs = new List<(int N, int kind)>();               // kind 0 = PrismFormer, 1 = transformer
+        foreach (var N in Ns) { jobs.Add((N, 0)); jobs.Add((N, 1)); }
+        jobs = jobs.OrderByDescending(j => j.N).ToList();        // longest-processing-time-first: start the big-N jobs first so they aren't end-of-run stragglers (minimises makespan)
+        var res = new System.Collections.Concurrent.ConcurrentDictionary<(int, int), (double r, int ep, bool conv)>();
+        Console.WriteLine($"training {jobs.Count} jobs concurrently ({Ns.Count} N × 2 models), early-stop at convergence/plateau (cap {passes} passes)…\n");
+        Parallel.ForEach(System.Collections.Concurrent.Partitioner.Create(jobs, System.Collections.Concurrent.EnumerablePartitionerOptions.NoBuffering), job =>
+        {
+            var facts = MakeFacts(job.N);
+            if (job.kind == 0)
+            {
+                var alg = new AlgFormer(vocab, shifts: 8, layers: 2, maxContext: ctx, dModel: PhasorCodec.Dim, frozenPrefix: PhasorCodec.FrozenReals, embedSeed: Seed, seed: 1);
+                res[job] = TrainEarly(alg.Predict, (k, v, ep) => alg.TrainStep(k, v, LrBase(ep)), facts);
+            }
+            else
+            {
+                var xf = new MiniTransformer(vocab, best.d, best.ff, best.L, ctx, 42, layerNorm: tuned);
+                res[job] = TrainEarly(xf.Predict, (k, v, ep) => { if (tuned) xf.TrainStep(k, v, LrTuned(ep), 0.9, 0.999, 1e-8); else xf.TrainStep(k, v, LrBase(ep)); }, facts);
+            }
+        });
+
+        var curveP = new List<(int N, double r)>(); var curveX = new List<(int N, double r)>();
+        Console.WriteLine("recall on the stored facts (early-stopped)  ·  conv=fits N, plat=exceeds capacity, @Nep=passes used --------");
+        Console.WriteLine($"  {"N facts",8}  {"PrismFormer",22}  {"transformer",22}");
+        string Fmt((double r, int ep, bool conv) t) => $"{t.r,7:P1} {(t.conv ? "conv" : "plat"),-4} @{t.ep,3}ep";
+        foreach (var N in Ns)
+        {
+            var p = res[(N, 0)]; var x = res[(N, 1)];
+            curveP.Add((N, p.r)); curveX.Add((N, x.r));
+            Console.WriteLine($"  {N,8}  {Fmt(p),22}  {Fmt(x),22}");
         }
 
         int Capacity(List<(int N, double r)> c, double thr) { var cap = 0; foreach (var (N, r) in c) if (r >= thr) cap = N; return cap; }
-        Console.WriteLine("\natomic capacity (largest N meeting the recall bar) -----------------------------");
+        Console.WriteLine("\natomic capacity (largest N still memorised) ------------------------------------");
         Console.WriteLine($"  ≥95% recall :  PrismFormer {Capacity(curveP, 0.95),6:N0}     transformer {Capacity(curveX, 0.95),6:N0}");
         Console.WriteLine($"  ≥50% recall :  PrismFormer {Capacity(curveP, 0.50),6:N0}     transformer {Capacity(curveX, 0.50),6:N0}");
+        if (curveP[^1].r >= 0.95 || curveX[^1].r >= 0.95) Console.WriteLine($"  NOTE: a model is still ≥95% at N={Ns[^1]} (the top) — its ceiling is HIGHER; re-run with --maxN above {maxN}.");
         Console.WriteLine("\nmemorisation, not held-out: every fact is arbitrary (no structure), so recall = raw associative-memory capacity.");
     }
 }
