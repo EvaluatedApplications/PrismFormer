@@ -34,7 +34,7 @@ catch { __artifactWriter = null; }
 try
 {
 var epochs = 150; var hi = 12;
-int? seedsArg = null, stepsArg = null, maxNArg = null;   // optional --seeds / --steps / --maxN overrides (--columnar, --capacity; smoke vs full sweep)
+int? seedsArg = null, stepsArg = null, maxNArg = null, dModelArg = null;   // optional --seeds / --steps / --maxN / --dModel overrides (--columnar, --capacity; smoke vs full sweep, model width)
 for (var i = 0; i < args.Length - 1; i++)
 {
     if (args[i] == "--epochs") epochs = int.Parse(args[i + 1]);
@@ -42,6 +42,7 @@ for (var i = 0; i < args.Length - 1; i++)
     if (args[i] == "--seeds") seedsArg = int.Parse(args[i + 1]);
     if (args[i] == "--steps") stepsArg = int.Parse(args[i + 1]);
     if (args[i] == "--maxN") maxNArg = int.Parse(args[i + 1]);
+    if (args[i] == "--dModel") dModelArg = int.Parse(args[i + 1]);
 }
 // --tuned-baseline: swap the transformer baseline for the MODERN, properly-tuned recipe (pre-norm LayerNorm +
 // linear-warmup→cosine LR + tuned Adam). It only strengthens the baseline (AlgFormer is untouched); combine with
@@ -83,7 +84,7 @@ if (args.Contains("--distinguish")) { CryptoDistinguisherBench.Run(); return; } 
 if (args.Contains("--speck")) { SpeckDistinguisherBench.Run(); return; }   // PrismFormer vs Gohr's real Speck32/64 benchmark: distinguisher accuracy at 5-8 rounds
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(seeds: seedsArg ?? 4, steps: stepsArg ?? 15000, tuned: tuned); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer (--tuned-baseline strengthens the transformer)
-if (args.Contains("--capacity")) { CapacityBench.Run(maxN: maxNArg ?? 4096, passes: stepsArg ?? 400, tuned: true); return; }   // atomic capacity: equal-sized transformer vs PrismFormer memorise the most random 2-symbol-key→value facts (minimal, no pattern); concurrent jobs, early-stop, sweep 1024..maxN step 512
+if (args.Contains("--capacity")) { CapacityBench.Run(maxN: maxNArg ?? 2048, passes: stepsArg ?? 400, tuned: true, dModel: dModelArg ?? 128); return; }   // atomic capacity: size-matched SMALL transformer vs SMALL PrismFormer (codec intact, right-sized vocab) memorise the most random 2-symbol-key→value facts; concurrent, early-stop, geometric sweep 64..maxN
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
 if (args.Contains("--lm")) { LanguageBench.Run(tuned: tuned); return; }             // isolated capability: character language modelling
 if (args.Contains("--scale")) { ScaleBench.Run(); return; }            // does it scale? held-out compute vs model size

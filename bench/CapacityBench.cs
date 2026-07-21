@@ -35,8 +35,8 @@ public static class CapacityBench
                                   // machinery to STORE the map — which is what makes the capacity ceiling real.
     const int ValueSet = 256;     // value = 1 of 256 random tokens (v0..v255); arbitrary key→value; chance recall = 1/256
 
-    public static void Run(int maxN = 4096, int passes = 800, bool tuned = true)
-    {
+    public static void Run(int maxN = 2048, int passes = 400, bool tuned = true, int dModel = 128)
+    {   // dModel < PhasorCodec.Dim keeps the frozen codec identity + a learned tail (a genuine, smaller PrismFormer). AlgFormer supports it; the probe, Seed, and the training job below must all use the SAME width (dm/frozen).
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
 
         // ---- fixed vocab (built up-front so tokens/seeds are stable across every N) ----
@@ -47,12 +47,19 @@ public static class CapacityBench
         var keyAlphabet = Math.Max(4, (int)Math.Ceiling(Math.Pow(maxN, 1.0 / KeyLen)) + 1);   // smallest alphabet whose KeyLen-tuples cover maxN unique keys → vocab stays tiny even at N in the thousands
         var keySym = new int[keyAlphabet]; for (var i = 0; i < keyAlphabet; i++) keySym[i] = Id($"s{i}");
         var valSym = new int[ValueSet]; for (var i = 0; i < ValueSet; i++) valSym[i] = Id($"v{i}");
-        var vocab = Math.Max(1024, id.Count + 8);
-        double[] Seed(int w) => w < words.Count ? PhasorCodec.Encode(words[w]) : new double[PhasorCodec.Dim];
+        var vocab = id.Count + 8;   // no 1024 floor: the pad rows never train and just bloat the embedding (88% of params) and the per-token softmax cost — dead weight, not capacity
+        var dm = Math.Min(dModel, PhasorCodec.Dim);         // model width. A SMALLER PrismFormer of the SAME TYPE: dm>=64 keeps the full frozen codec identity + a learned tail (still a real PrismFormer, just a smaller container). Only dm<64 would drop into codec-less orbital-only.
+        var frozen = Math.Min(PhasorCodec.FrozenReals, dm);
+        double[] Seed(int w)
+        {
+            var full = w < words.Count ? PhasorCodec.Encode(words[w]) : new double[PhasorCodec.Dim];
+            if (dm >= full.Length) return full;
+            var s = new double[dm]; Array.Copy(full, s, dm); return s;   // truncate the codec vector to the model width (keeps the frozen identity prefix intact)
+        }
 
-        // ---- models at the repo's production head-to-head convention; transformer auto-matched to AlgFormer params ----
+        // ---- models: a SMALL PrismFormer (codec intact) vs a size-matched small transformer — smallest valid container of each type, so the run is minutes ----
         const int ctx = 16;
-        var probe = new AlgFormer(vocab, shifts: 8, layers: 2, maxContext: ctx, dModel: PhasorCodec.Dim, frozenPrefix: PhasorCodec.FrozenReals, embedSeed: Seed, seed: 1);
+        var probe = new AlgFormer(vocab, shifts: 8, layers: 2, maxContext: ctx, dModel: dm, frozenPrefix: frozen, embedSeed: Seed, seed: 1);
         var targetParams = probe.ParamCount;
         (int d, int L, int ff) best = (32, 2, 64); var bestDelta = long.MaxValue;
         foreach (var d in new[] { 24, 32, 40, 48, 56, 64, 96, 128, 160, 192, 256 })
@@ -64,7 +71,7 @@ public static class CapacityBench
         Console.WriteLine($"PrismFormer vs pound-for-pound transformer — ATOMIC CAPACITY (unique-fact memorisation)   {DateTime.Now:yyyy-MM-dd HH:mm}");
         if (!AlgFormer.GradCheck(out var ar) || !MiniTransformer.GradCheck(out var xr, layerNorm: tuned)) { Console.WriteLine("GRADCHECK FAILED — aborting"); return; }
         Console.WriteLine($"gradchecks pass (prism {ar:E1}, transformer{(tuned ? " +LN" : "")} {xr:E1})");
-        Console.WriteLine($"params: PrismFormer {targetParams:N0} (d={PhasorCodec.Dim}, S=8, L=2)   transformer {xfParams:N0} (d={best.d}, dff={best.ff}, L={best.L}{(tuned ? ", +LayerNorm" : "")})   ({(double)xfParams / targetParams:F2}x pound-for-pound)");
+        Console.WriteLine($"params: PrismFormer {targetParams:N0} (d={dm}, S=8, L=2, frozen={frozen})   transformer {xfParams:N0} (d={best.d}, dff={best.ff}, L={best.L}{(tuned ? ", +LayerNorm" : "")})   ({(double)xfParams / targetParams:F2}x pound-for-pound)");
         Console.WriteLine($"key = {KeyLen} symbols over a {keyAlphabet}-symbol alphabet + \"=\"  ·  value = 1 of {ValueSet} tokens (arbitrary, must be stored)  ·  chance recall {1.0 / ValueSet:P1}  ·  vocab {id.Count} (FIXED as N grows)");
         Console.WriteLine($"train BOTH with early-stop (cap {passes} passes; stop at convergence or plateau)  ·  concurrent jobs  ·  vocab {id.Count}\n");
 
@@ -98,9 +105,9 @@ public static class CapacityBench
         double LrTuned(int ep) { const double peak = 2e-3; if (ep <= warm) return peak * ep / warm; var t = (ep - warm) / (double)Math.Max(1, passes - warm); return peak * (0.05 + 0.95 * 0.5 * (1 + Math.Cos(Math.PI * t))); }
         double LrBase(int ep) => 2e-3 * (1.0 - 0.9 * (ep - 1) / Math.Max(1, passes - 1));
 
-        // Sweep STARTS at 1024 (64..512 were trivially 100%/100% — no signal), steps up to maxN and brackets both ceilings.
-        var Ns = new List<int>(); for (var n = 1024; n <= maxN; n += 512) Ns.Add(n);
-        if (Ns.Count == 0) Ns.Add(maxN);
+        // GEOMETRIC sweep (64,128,256,…): a quick spread that brackets both ceilings in few points, so wall-time = the single slowest job, not a long linear grind.
+        var Ns = new List<int>(); for (var n = 64; n <= maxN; n *= 2) Ns.Add(n);
+        if (Ns.Count == 0) Ns.Add(maxN); else if (Ns[^1] != maxN) Ns.Add(maxN);
 
         // EARLY-STOP per model: eval recall every CHECK passes; STOP when it converges (>=DONE ⇒ it fits N) or plateaus
         // (rises slower than MINGAIN/check for PLATEAU checks ⇒ N exceeds its capacity). No fixed grind. This is MORE
@@ -140,7 +147,7 @@ public static class CapacityBench
             var facts = MakeFacts(job.N);
             if (job.kind == 0)
             {
-                var alg = new AlgFormer(vocab, shifts: 8, layers: 2, maxContext: ctx, dModel: PhasorCodec.Dim, frozenPrefix: PhasorCodec.FrozenReals, embedSeed: Seed, seed: 1);
+                var alg = new AlgFormer(vocab, shifts: 8, layers: 2, maxContext: ctx, dModel: dm, frozenPrefix: frozen, embedSeed: Seed, seed: 1);   // MUST match the probe + Seed width (dm/frozen); hardcoding PhasorCodec.Dim here while Seed truncates to dm gave a 256-wide model with 128-wide embeddings → the ForwardAll crash
                 res[job] = TrainEarly(alg.Predict, (k, v, ep) => alg.TrainStep(k, v, LrBase(ep)), facts);
             }
             else
