@@ -34,6 +34,7 @@ public static class CapacityBench
                                   // never saturate (capacity would just track the vocab). Shared symbols force the fixed
                                   // machinery to STORE the map — which is what makes the capacity ceiling real.
     const int ValueSet = 256;     // value = 1 of 256 random tokens (v0..v255); arbitrary key→value; chance recall = 1/256
+    const int KeyAlphabet = 128;  // FIXED, independent of maxN. RIGOUR: vocab (hence both models' param budget) stays IDENTICAL at every N and across every run, so the recall-vs-N curve is comparable run-to-run. 128^KeyLen = 16,384 distinct keys covers maxN into the low tens of thousands. (Was √maxN, which drifted the model size between runs.)
 
     public static void Run(int maxN = 2048, int passes = 400, bool tuned = true, int dModel = 128)
     {   // dModel < PhasorCodec.Dim keeps the frozen codec identity + a learned tail (a genuine, smaller PrismFormer). AlgFormer supports it; the probe, Seed, and the training job below must all use the SAME width (dm/frozen).
@@ -44,7 +45,9 @@ public static class CapacityBench
         var words = new List<string> { "<pad>" };
         int Id(string w) { if (id.TryGetValue(w, out var i)) return i; i = id.Count; id[w] = i; words.Add(w); return i; }
         var eq = Id("=");
-        var keyAlphabet = Math.Max(4, (int)Math.Ceiling(Math.Pow(maxN, 1.0 / KeyLen)) + 1);   // smallest alphabet whose KeyLen-tuples cover maxN unique keys → vocab stays tiny even at N in the thousands
+        var maxKeys = (int)Math.Pow(KeyAlphabet, KeyLen);
+        if (maxN > (int)(0.85 * maxKeys)) maxN = (int)(0.85 * maxKeys);   // keep unique-key rejection sampling fast (never crowd the key space); raise KeyAlphabet for a larger sweep
+        var keyAlphabet = KeyAlphabet;   // FIXED (not √maxN) → constant vocab/model size across every N and run
         var keySym = new int[keyAlphabet]; for (var i = 0; i < keyAlphabet; i++) keySym[i] = Id($"s{i}");
         var valSym = new int[ValueSet]; for (var i = 0; i < ValueSet; i++) valSym[i] = Id($"v{i}");
         var vocab = id.Count + 8;   // no 1024 floor: the pad rows never train and just bloat the embedding (88% of params) and the per-token softmax cost — dead weight, not capacity
@@ -105,8 +108,11 @@ public static class CapacityBench
         double LrTuned(int ep) { const double peak = 2e-3; if (ep <= warm) return peak * ep / warm; var t = (ep - warm) / (double)Math.Max(1, passes - warm); return peak * (0.05 + 0.95 * 0.5 * (1 + Math.Cos(Math.PI * t))); }
         double LrBase(int ep) => 2e-3 * (1.0 - 0.9 * (ep - 1) / Math.Max(1, passes - 1));
 
-        // GEOMETRIC sweep (64,128,256,…): a quick spread that brackets both ceilings in few points, so wall-time = the single slowest job, not a long linear grind.
-        var Ns = new List<int>(); for (var n = 64; n <= maxN; n *= 2) Ns.Add(n);
+        // Coarse low anchors (flat, both-memorise region) + DENSE linear steps (512) through the break zone so the recall-vs-N
+        // curve resolves where each model crosses 95%. Wall-time is set by the single slowest job, so extra points are ~free.
+        var Ns = new List<int>();
+        for (var n = 256; n <= 1024 && n <= maxN; n *= 2) Ns.Add(n);        // 256,512,1024 — context
+        for (var n = 2048; n <= maxN; n += 512) Ns.Add(n);                  // dense through both break points
         if (Ns.Count == 0) Ns.Add(maxN); else if (Ns[^1] != maxN) Ns.Add(maxN);
 
         // EARLY-STOP per model: eval recall every CHECK passes; STOP when it converges (>=DONE ⇒ it fits N) or plateaus
