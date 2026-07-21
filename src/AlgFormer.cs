@@ -139,18 +139,20 @@ public sealed class AlgFormer
         return true;
     }
 
-    /// <summary>UPGRADE-IN-PLACE: load an OLDER checkpoint (smaller <c>Shifts</c> and/or <c>Context</c>) into this
-    /// (larger) model, IDENTITY-PRESERVING — new shift rows are zeroed (they contribute nothing to the algebraic sum, so
-    /// output is byte-identical the instant you extend, then training fills them in), and extra <c>Pos</c> rows keep their
-    /// init (never indexed on ≤ old-context inputs). The non-growable dims (vocab, dim, layers) must match. <paramref
+    /// <summary>UPGRADE-IN-PLACE: load an OLDER checkpoint (smaller <c>Shifts</c>, <c>Context</c>, and/or <c>Vocab</c>)
+    /// into this (larger) model. New shift rows are zeroed (they contribute nothing to the algebraic sum, so output is
+    /// byte-identical the instant you extend, then training fills them in); extra <c>Pos</c> rows keep their init (never
+    /// indexed on ≤ old-context inputs); and VOCAB is APPEND-ONLY — the old rows [0, ov) carry over and the appended rows
+    /// [ov, vocab) keep this model's construction seed (their codec faces), so the learned char knowledge is preserved and
+    /// the new subword rows start at their identity. The fixed dims (dim, frozen, layers) must match. <paramref
     /// name="oldMaxT"/> is the old context length (its Pos-row count). Lets capacity grow without a retrain.</summary>
     public bool LoadUpgrade(System.IO.BinaryReader r, int oldMaxT)
     {
         int ov = r.ReadInt32(), od = r.ReadInt32(), os = r.ReadInt32(), ol = r.ReadInt32();
-        if (ov != _v || od != _d || ol != _layers || os > _s || oldMaxT > _maxT) return false;   // only Shifts + Context may GROW
-        for (var w = 0; w < ov; w++) for (var i = 0; i < od; i++) Emb[w][i] = r.ReadDouble();
+        if (ov > _v || od != _d || ol != _layers || os > _s || oldMaxT > _maxT) return false;   // Shifts, Context, and Vocab may GROW (vocab is APPEND-ONLY: ov <= _v)
+        for (var w = 0; w < ov; w++) for (var i = 0; i < od; i++) Emb[w][i] = r.ReadDouble();     // old rows carry over; appended rows [ov.._v) keep their construction seed (codec faces)
         for (var t = 0; t < oldMaxT; t++) for (var i = 0; i < od; i++) Pos[t][i] = r.ReadDouble();   // extra Pos rows keep their init
-        for (var w = 0; w < ov; w++) C[w] = r.ReadDouble();
+        for (var w = 0; w < ov; w++) C[w] = r.ReadDouble();                                       // appended readout entries C[ov.._v) keep their init (0)
         for (var l = 0; l < _layers; l++)
             foreach (var bank in new[] { Ls[l].Rq, Ls[l].Rk, Ls[l].Rv, Ls[l].Ro, Ls[l].A1, Ls[l].Ag, Ls[l].Ao })
             {

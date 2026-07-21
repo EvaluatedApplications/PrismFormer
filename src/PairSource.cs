@@ -15,13 +15,20 @@ public sealed class CharVocab
     public const int Lo = 32, Hi = 126;
     public const int Printable = Hi - Lo + 1;                     // 95 printable ASCII
     public const int End = Printable;                            // 95 — end-of-turn / STOP token; the model learns to emit it so the REPL knows to stop
-    public const int N = Printable + 1;                          // 96 — total vocab (printable + STOP). PrismSpec.Vocab uses this.
+    public const int N = Printable + 1;                          // 96 — the CHAR base vocab (printable + STOP). Subword tokens (if any) are appended AFTER this.
     public const int Pad = 0;                                    // space — left-pad for short contexts
-    public int Size => N;
+
+    // Shared, deterministic subword extension (n-grams len 2..4) loaded from the committed embedded resource. EMPTY =>
+    // pure char level (Encode == char ids, Total == 96). Static so every CharVocab instance and every node agree.
+    static readonly SubwordVocab _sw = new(SubwordTable.List);
+    public static int Total => _sw.Size;                         // 96 + subword count — THE model vocab (PrismSpec.Vocab uses this)
+    public int Size => Total;
+
     public int Id(char c) => c >= Lo && c <= Hi ? c - Lo : 0;   // printable → 0..94; everything else (incl newline) → space. STOP is appended EXPLICITLY (Q&A/chat), never from corpus text.
     public char Chr(int id) => id == End ? '\n' : (char)(Lo + Math.Clamp(id, 0, Printable - 1));
-    public int[] Encode(string s) { var a = new int[s.Length]; for (var i = 0; i < s.Length; i++) a[i] = Id(s[i]); return a; }
-    public string Decode(IEnumerable<int> ids) { var sb = new StringBuilder(); foreach (var i in ids) sb.Append(Chr(i)); return sb.ToString(); }
+    public string Symbol(int id) => _sw.Symbol(id);             // token id → its literal text (char OR subword); for decode AND codec seeding
+    public int[] Encode(string s) => _sw.Encode(s);            // greedy longest-match subword tokenisation (byte-identical to char 1:1 when the list is empty)
+    public string Decode(IEnumerable<int> ids) => _sw.Decode(ids);
 }
 
 /// <summary>

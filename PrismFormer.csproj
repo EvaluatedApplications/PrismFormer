@@ -17,6 +17,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="src/**/*.cs" />
+    <!-- THE committed subword vocab (deterministic, frequency-selected n-grams len 2..4). Embedded so every deployed
+         node carries the byte-identical list — the property that keeps the vocab layout, hence index-based exact-merge,
+         identical across the swarm. Empty/absent => pure char level. -->
+    <EmbeddedResource Include="src/subwords.txt"><LogicalName>PrismFormer.subwords.txt</LogicalName></EmbeddedResource>
     <PackageReference Include="EvalApp.Consumer" Version="1.0.13" />
     <!-- Relay transport: host + slaves dial OUT to a free public MQTT broker, so it works through any NAT with no
          port-forward and nothing to install — the "paste a code and it works over the internet" path. -->

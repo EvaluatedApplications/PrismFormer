@@ -167,11 +167,11 @@ public static class UpgradeBench
     public static void RunSample(string[] paths)
     {
         var v = new CharVocab();
-        double[] Seed(int w) => w < CharVocab.Printable ? PhasorCodec.Encode(((char)(32 + w)).ToString()) : new double[PhasorCodec.Dim];
+        double[] Seed(int w) => PhasorCodec.Encode(v.Symbol(w));   // char OR subword face
         foreach (var path in paths)
         {
             if (!File.Exists(path)) { Console.WriteLine($"{path}  (missing)"); continue; }
-            var m = new AlgFormer(CharVocab.N, PrismSpec.Shifts, PrismSpec.Layers, PrismSpec.Context, PhasorCodec.Dim, PhasorCodec.FrozenReals, Seed, PrismSpec.InitSeed);
+            var m = new AlgFormer(PrismSpec.Vocab, PrismSpec.Shifts, PrismSpec.Layers, PrismSpec.Context, PhasorCodec.Dim, PhasorCodec.FrozenReals, Seed, PrismSpec.InitSeed);
             var ok = false; var sig = "?";
             try
             {
@@ -256,40 +256,43 @@ public static class UpgradeBench
     // ── Verify the upgrade-in-place round-trip BEFORE shipping a spec bump to the colony: a checkpoint saved at the old
     //    Context must LoadUpgrade into the new Context byte-clean — identical logits on any in-window prompt (weights carry
     //    over, new Pos rows zero-pad → contribute nothing). If this drifts, every node's checkpoint would corrupt on load. ──
-    public static void RunSpec(int oldContext = 512)
+    public static void RunSpec(int oldContext = 512, int oldShifts = 64)
     {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
-        const int vocab = CharVocab.N, L = 8, S = 64;
+        const int oldVocab = CharVocab.N, L = 8;   // "old on disk" = the char-level model before the bump
         var D = PhasorCodec.Dim; var frozen = PhasorCodec.FrozenReals;
         var v = new CharVocab();
-        double[] Seed(int w) => w < CharVocab.Printable ? PhasorCodec.Encode(((char)(32 + w)).ToString()) : new double[PhasorCodec.Dim];
+        double[] Seed(int w) => PhasorCodec.Encode(v.Symbol(w));   // char OR subword face — valid for both the v96 old and the v-full new model
+        int[] Chars(string s) => s.Select(c => v.Id(c)).ToArray();  // CHAR ids only, so the v96 old model never sees a subword id
 
         Console.WriteLine($"current spec Signature = {PrismSpec.Signature}");
-        var oldSig = $"{PrismSpec.Version}/v{vocab}/d{D}/f{frozen}/c{oldContext}/L{L}/S{S}";
+        var oldSig = $"{PrismSpec.Version}/v{oldVocab}/d{D}/f{frozen}/c{oldContext}/L{L}/S{oldShifts}";
         var old = PrismSpec.Parse(oldSig);
         Console.WriteLine($"old-on-disk Signature  = {oldSig}");
         Console.WriteLine($"CanUpgradeFrom(old)    = {(old != null && PrismSpec.CanUpgradeFrom(old))}");
 
-        // "old" model at the old context, given some non-trivial training so weights aren't all-init
-        var a = new AlgFormer(vocab, shifts: S, layers: L, maxContext: oldContext, dModel: D, frozenPrefix: frozen, embedSeed: Seed, seed: 1);
-        var corpus = v.Encode(new string(LoadCorpus(60_000).Select(c => c >= 32 && c <= 126 ? c : ' ').ToArray()));
+        // "old" char-level model at the old context/shifts, given some non-trivial training so weights aren't all-init
+        var a = new AlgFormer(oldVocab, shifts: oldShifts, layers: L, maxContext: oldContext, dModel: D, frozenPrefix: frozen, embedSeed: Seed, seed: 1);
+        var corpus = Chars(new string(LoadCorpus(60_000).Select(c => c >= 32 && c <= 126 ? c : ' ').ToArray()));
         var rng = new Random(1);
         var data = Enumerable.Range(0, 300).Select(_ => { var p = 40 + rng.Next(corpus.Length - 41); return (corpus[(p - 40)..p], corpus[p]); }).ToList();
         a.Train(data, 2, batchSize: 64, baseLr: 1.5e-3, seed: 1);
 
-        var prompt = v.Encode("user: hello there\nprism: ");   // short, within the old window
+        var prompt = Chars("user: hello there\nprism: ");   // CHAR ids — valid for both old (v96) and new (v-full)
         var la = a.LogitsFor(prompt);
 
         var ms = new MemoryStream();
         using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, true)) a.Save(w);
         ms.Position = 0;
-        var b = new AlgFormer(vocab, shifts: S, layers: L, maxContext: PrismSpec.Context, dModel: D, frozenPrefix: frozen, embedSeed: Seed, seed: 1);
+        var b = new AlgFormer(PrismSpec.Vocab, shifts: PrismSpec.Shifts, layers: PrismSpec.Layers, maxContext: PrismSpec.Context, dModel: D, frozenPrefix: frozen, embedSeed: Seed, seed: PrismSpec.InitSeed);
         bool okUp; using (var r = new BinaryReader(ms, System.Text.Encoding.UTF8, true)) okUp = b.LoadUpgrade(r, oldContext);
         var lb = b.LogitsFor(prompt);
 
-        var maxDiff = 0.0; for (var i = 0; i < la.Length; i++) maxDiff = Math.Max(maxDiff, Math.Abs(la[i] - lb[i]));
-        Console.WriteLine($"LoadUpgrade ok         = {okUp}   ({old!.Context} -> {PrismSpec.Context})");
-        Console.WriteLine($"identity check         = max|logit_old - logit_new| = {maxDiff:E3}  (in-window prompt -> must be ~0)");
-        Console.WriteLine(okUp && maxDiff < 1e-9 ? "  PASS — upgrade is identity-preserving; c256 checkpoints carry over byte-clean, no retrain." : "  FAIL — drift or load error; DO NOT ship the bump.");
+        // compare over the OLD vocab range (the preserved region): char rows + forward must be byte-identical, and the
+        // new subword/shift rows must not perturb a char-token forward (subword rows unused, new shift rows are zero).
+        var maxDiff = 0.0; for (var i = 0; i < oldVocab; i++) maxDiff = Math.Max(maxDiff, Math.Abs(la[i] - lb[i]));
+        Console.WriteLine($"LoadUpgrade ok         = {okUp}   (v{oldVocab}/c{oldContext}/S{oldShifts} -> v{PrismSpec.Vocab}/c{PrismSpec.Context}/S{PrismSpec.Shifts})");
+        Console.WriteLine($"identity check         = max|logit_old - logit_new| over char range = {maxDiff:E3}  (char knowledge must carry over -> ~0)");
+        Console.WriteLine(okUp && maxDiff < 1e-9 ? "  PASS — char knowledge carries over byte-clean; new shift/subword rows are identity at init. Safe to ship." : "  FAIL — drift or load error; DO NOT ship the bump.");
     }
 }

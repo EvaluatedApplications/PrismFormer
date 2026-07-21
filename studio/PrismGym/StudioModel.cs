@@ -73,7 +73,7 @@ public sealed class StudioModel
     }
 
     // canonical codec face for a token id — the FROZEN identity prefix holds its exact value; used to seed AND to restore
-    double[] Seed(int w) => w < CharVocab.N ? PhasorCodec.Encode(_v.Chr(w).ToString()) : new double[PhasorCodec.Dim];
+    double[] Seed(int w) => PhasorCodec.Encode(_v.Symbol(w));   // char OR subword text → its codec face (number face if it parses as a number, else signature); frozen prefix holds the exact identity
 
     static AlgFormer Clone(AlgFormer m) { var c = AlgFormer.Deserialize(m.Serialize()); c.Map = PrismEval.Cpu; return c; }   // the lock-free SERVING snapshot uses the EvalApp CPU-gated forward; the training _model stays sequential (it's already batch-parallel)
     static string Tail(string s) => (s.Length > 90 ? "…" + s[^90..] : s).TrimStart();   // log preview only — the ellipsis marks that the FULL context (up to 256) is what's trained on
@@ -115,7 +115,7 @@ public sealed class StudioModel
         for (var k = 0; k < n; k++)
         {
             var t = PickToken(lg); if (t == CharVocab.End) break;
-            sb.Append(_v.Chr(t)); window.Add(t);
+            sb.Append(_v.Symbol(t)); window.Add(t);   // Symbol → the token's text (a subword emits its whole 2..4 chars)
             if (cache.Length < PrismSpec.Context) lg = m.Step(cache, t);          // O(T) fast path
             else lg = m.Prime(cache, window.GetRange(window.Count - (PrismSpec.Context - 1), PrismSpec.Context - 1).ToArray());   // window full → slide-recompute
         }
@@ -158,7 +158,7 @@ public sealed class StudioModel
         var warm = 4;
         var epochSecs = Math.Max(5.0, minutesPerEpoch * 60.0);   // an "epoch" = ~minutesPerEpoch of random draws — the corpus is far too big for a full pass
         var sw = Stopwatch.StartNew(); long stepTotal = 0; double lastSnap = 0, lastSample = 0, loss = 0; var first = true; var sampleTick = 0; var genBusy = false;
-        if (corpus.Count > 0) try { var (e0, t0) = corpus.GetExample(rng.NextInt64(corpus.Count)); log($"…{Clean(Tail(_v.Decode(e0)))} ▸ \"{_v.Chr(_snapshot.Predict(e0))}\"  (real \"{_v.Chr(t0)}\")"); } catch { }   // instant: untrained guess
+        if (corpus.Count > 0) try { var (e0, t0) = corpus.GetExample(rng.NextInt64(corpus.Count)); log($"…{Clean(Tail(_v.Decode(e0)))} ▸ \"{_v.Symbol(_snapshot.Predict(e0))}\"  (real \"{_v.Symbol(t0)}\")"); } catch { }   // instant: untrained guess (Symbol → char or subword)
         for (var ep = 0; ep < epochs && !ct.IsCancellationRequested; ep++)
         {
             // one source PER FOLDER, then sampled by VOLUME (weight = Count^MixAlpha) so the big corpus gets the share its
