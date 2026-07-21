@@ -35,7 +35,10 @@ held-out) where a matched transformer given the identical problem stays near zer
 legible one column at a time with no trained probe. On comparison and relational tasks it generalises
 better than a transformer that *fits the same training data* (held-out 65.9% vs 49.1% on the fair
 tasks; both reach 100% on copy). It is a competitive character language model at matched size (41.0%
-vs 21.7% next-character accuracy). I report a two-sided ablation of my central design choice: freezing
+vs 21.7% next-character accuracy). On pure memorisation of an arbitrary key-value store, with nothing to
+generalise from, a matched transformer's reliable capacity runs out and it destabilises while PrismFormer
+holds full recall to at least twice as many facts (a single exploratory sweep). I report a two-sided
+ablation of my central design choice: freezing
 the numeric identity is *not* what makes any single operation generalise (with one task in isolation, an
 unfrozen identity does better), but under realistic **shared multi-task load** freezing wins the held-out
 comparison, because the identity is a residual every task shares, and drifting it to fit one operation
@@ -305,6 +308,7 @@ several random seeds with its standard deviation, produced by the listed command
 | §4.4 mechanistic (`--inspect`) | 177,421 | 169,213 | 8 × 6k steps | single-digit, ~20% held |
 | §4.5 language (`--lm`) | 249,920 | 259,776 | 5 × 30 ep | 1,670-char corpus, contiguous held tail |
 | §4.6 exact-merge (`verify/Verify`) | `Mini` | — | deterministic | — |
+| §4.7 atomic capacity (`--capacity`) | 67,210 | 67,306 | early-stop, 16 N | random key→value, memorise |
 
 ### 4.2 Comparison and relational generalisation
 
@@ -447,6 +451,43 @@ index order yields gradient tensors with an identical bitwise (FNV) checksum
 (`0x945A7A4E8E0B9F3B`), and a re-run reproduces it exactly. The `verify/` kit reproduces this in
 seconds; the benchmark's `--gradcheck` extends it to the full production spec. This is the property that
 lets a mismatched-CPU colony sum into one coherent model.
+
+### 4.7 Atomic memory capacity
+
+Every experiment so far tests generalisation, where the codec is meant to help. The opposite question is
+raw storage: with nothing to generalise from, how many arbitrary facts can each model simply hold? I build
+a key→value store with no structure at all. Each key is two symbols over a fixed 128-symbol alphabet and
+its value is one of 256 tokens drawn uniformly at random, so nothing can be inferred and every fact must be
+memorised. The vocabulary is fixed, so neither model's parameter budget grows with the number of facts N,
+and both are pound-for-pound at about 67k parameters (the transformer auto-matched as everywhere else).
+Both train with early stopping: each runs until it converges to full recall (it fits N) or plateaus (past
+its capacity), which is a truer capacity probe than a fixed budget because it does not conflate how fast a
+model learns with how much it can hold. This is a single exploratory sweep at one seed, so I read the shape
+of the curve, not a calibrated margin.
+
+| N facts | PrismFormer | transformer |
+|--------:|-------------|-------------|
+| 512 | 99.0% | 100.0% |
+| 1,024 | 98.4% | 98.8% |
+| 2,048 | 98.8% | 96.1% |
+| 3,584 | 99.3% | 97.8% |
+| 4,096 | **98.0%** | 33.0% |
+| 5,120 | **98.5%** | 71.3% |
+| 6,656 | **98.4%** | 51.7% |
+| 8,192 | **98.9%** | 7.2% |
+
+PrismFormer converges to full recall (98–99%) at every N across the whole sweep, out to 8,192 facts; its
+ceiling is above the top of the sweep and I did not find it. The matched transformer holds to about
+N=3,584, then falls off a cliff at 4,096 (33%) and thrashes beyond it, individual points bouncing between
+roughly 5% and 71% as N grows, which is training collapse rather than graceful decay. Taking the largest N
+still at ≥95% recall as the atomic capacity, PrismFormer reaches at least 8,192 against the transformer's
+3,584: a factor of at least 2.3, and a lower bound, because the phasor side never broke in range. This is
+the memorisation counterpart to the generalisation results above, not a substitute for them; a store of
+random pairs is the easiest thing there is to overfit, and the only claim is the relative capacity and
+stability at matched size. The transformer's exact break point and its post-break values are seed-sensitive,
+and that instability is itself part of the finding: at matched size the phasor substrate stores markedly
+more and degrades gracefully where the dense baseline destabilises. Run `dotnet run --project bench -c
+Release -- --capacity`.
 
 ---
 
