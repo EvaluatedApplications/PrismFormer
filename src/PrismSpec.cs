@@ -25,10 +25,10 @@ public static class PrismSpec
     public const int Vocab = CharVocab.N;                // 95 — printable ASCII 32..126 (char level, one tokenizer forever)
     public const int Context = 1024;                     // 1024 characters of context (~170 words / a paragraph of chat) — grown in place 256→512→1024 (older checkpoints zero-pad up via LoadUpgrade); cheap on params + everyday serve, but O(T²) attention when the window is actually FILLED
     public const int Layers = 8;                         // depth
-    public const int Shifts = 64;                        // relation-bank rank (S)
+    public const int Shifts = 256;                       // relation-bank rank (S) — grown 64→256 (max, = Dim) in place via LoadUpgrade (new shift rows zero-pad, identity-preserving). ~4x the S64 bank compute.
     public const int InitSeed = 1;                       // canonical init seed
 
-    public static int Dim => PhasorLayout.Dim;           // 128 reals — frozen by the phasor codec (PhasorLayout)
+    public static int Dim => PhasorLayout.Dim;           // 256 reals (= 128 complex components x 2) — frozen by the phasor codec (PhasorLayout)
     public static int FrozenPrefix => PhasorLayout.FrozenReals;  // 64 — frozen identity prefix
 
     /// <summary>Build THE production model. <paramref name="embedSeed"/> supplies the phasor codec's per-symbol seed
