@@ -9,13 +9,12 @@ namespace PrismFormer;
 /// production Prism model shape; the only knob is how much you train it. (Diagnostics/experiments may still build
 /// off-spec tiny models directly via the AlgFormer ctor — those never join the swarm.)
 ///
-/// Interop rule: a model is swarm-compatible iff its (Version, Vocab, Dim, FrozenPrefix, Context, Layers, Shifts) all
-/// match (the mesh gate is exact-Signature). Changing a NON-GROWABLE dim (Version, Dim, FrozenPrefix, Layers) is a
-/// hard fork → new Version + fresh weights. GROWING Context, Shifts, or Vocab is an UPGRADE-IN-PLACE within the same
-/// Version: old checkpoints carry over (Context/Shifts zero-pad up, identity-preserving; Vocab is APPEND-ONLY — the
-/// char rows 0..95 carry over and appended subword rows seed from their codec faces). See CanUpgradeFrom /
-/// AlgFormer.LoadUpgrade. It still changes the Signature, so the whole swarm must move to the new build together
-/// (older-spec peers are gated out).
+/// Interop rule: a model is swarm-compatible iff its full Signature (Version, Vocab, vocab-content Hash, Dim, FrozenPrefix,
+/// Context, Layers, Shifts) matches (the mesh gate is exact-Signature). Changing Version, Dim, FrozenPrefix, Layers, or the
+/// VOCAB (any content change — the Hash gate makes even a same/larger-count regeneration a hard fork, so a mis-indexed
+/// upgrade can't happen) → fresh weights. Only GROWING Context or Shifts is an UPGRADE-IN-PLACE within the same Version +
+/// same vocab: old checkpoints carry over (zero-pad up, identity-preserving). See CanUpgradeFrom / AlgFormer.LoadUpgrade.
+/// Any change still moves the Signature, so the whole swarm must move to the new build together (older-spec peers gated out).
 /// </summary>
 public static class PrismSpec
 {
@@ -47,11 +46,24 @@ public static class PrismSpec
         return Layers > 1 ? m.GrowLayers(Layers - 1, zeroOutputOnly: true, seed: InitSeed) : m;
     }
 
-    /// <summary>Compact tag written into checkpoints so an incompatible model is rejected rather than silently mis-merged.</summary>
-    public static string Signature => $"{Version}/v{Vocab}/d{Dim}/f{FrozenPrefix}/c{Context}/L{Layers}/S{Shifts}";
+    /// <summary>8-hex content hash of the subword table — folds the actual vocab CONTENT into the Signature so a REGENERATED
+    /// vocab (different tokens at the same indices, even at the same or a larger count) is a hard fork, NOT a spurious
+    /// append-only upgrade. Char rows 0..95 are fixed, so hashing the subwords captures the entire variable part.</summary>
+    public static string VocabHash
+    {
+        get
+        {
+            ulong h = 1469598103934665603UL;
+            foreach (var s in SubwordTable.List) { foreach (var ch in s) { h ^= ch; h *= 1099511628211UL; } h ^= 10; h *= 1099511628211UL; }
+            return ((uint)(h ^ (h >> 32))).ToString("x8");
+        }
+    }
 
-    /// <summary>Parsed spec fields from a <see cref="Signature"/> string (null if unparseable).</summary>
-    public sealed record Fields(string Version, int Vocab, int Dim, int Frozen, int Context, int Layers, int Shifts);
+    /// <summary>Compact tag written into checkpoints so an incompatible model is rejected rather than silently mis-merged.</summary>
+    public static string Signature => $"{Version}/v{Vocab}/h{VocabHash}/d{Dim}/f{FrozenPrefix}/c{Context}/L{Layers}/S{Shifts}";
+
+    /// <summary>Parsed spec fields from a <see cref="Signature"/> string (null if unparseable). Hash is "" for pre-hash sigs.</summary>
+    public sealed record Fields(string Version, int Vocab, string Hash, int Dim, int Frozen, int Context, int Layers, int Shifts);
 
     public static Fields? Parse(string sig)
     {
@@ -59,17 +71,20 @@ public static class PrismSpec
         {
             var p = (sig ?? "").Split('/');
             int G(string k) => int.Parse(p.First(x => x.StartsWith(k))[k.Length..]);
-            return new Fields(p[0], G("v"), G("d"), G("f"), G("c"), G("L"), G("S"));
+            string GS(string k) { var x = p.FirstOrDefault(y => y.StartsWith(k)); return x is null ? "" : x[k.Length..]; }
+            return new Fields(p[0], G("v"), GS("h"), G("d"), G("f"), G("c"), G("L"), G("S"));
         }
         catch { return null; }
     }
 
     /// <summary>Can a checkpoint saved under <paramref name="old"/> be UPGRADED-in-place into the current spec? True iff the
-    /// non-growable dims (Version, Vocab, Dim, Frozen, Layers) match and only Shifts/Context are the same-or-smaller — i.e.
-    /// we can zero-pad it up (see <see cref="AlgFormer.LoadUpgrade"/>). Anything else is a hard fork → start fresh.</summary>
+    /// Version, the exact VOCAB CONTENT (Hash), Dim, Frozen and Layers all match, and only Shifts/Context are the-same-or-
+    /// smaller (we zero-pad those up, see <see cref="AlgFormer.LoadUpgrade"/>). The Hash gate means ANY vocab regeneration —
+    /// even to the same or a larger count — is a HARD FORK (discard + rebuild), never a silent mis-indexed upgrade. A pre-hash
+    /// checkpoint has Hash="" ≠ VocabHash, so it too is correctly rejected. Anything else → start fresh.</summary>
     public static bool CanUpgradeFrom(Fields old)
-        => old.Version == Version && old.Vocab <= Vocab && old.Dim == Dim && old.Frozen == FrozenPrefix
-           && old.Layers == Layers && old.Shifts <= Shifts && old.Context <= Context;   // Vocab may GROW (append-only): old char rows carry over, new subword rows seed from their codec faces
+        => old.Version == Version && old.Hash == VocabHash && old.Vocab == Vocab && old.Dim == Dim && old.Frozen == FrozenPrefix
+           && old.Layers == Layers && old.Shifts <= Shifts && old.Context <= Context;
 
     /// <summary>Mesh gate: may we exchange weights with a peer advertising <paramref name="theirSig"/>? Only EXACT-spec peers
     /// merge safely (weight-slices are shape-specific). A peer on an older/newer/incompatible spec is blocked — they must
