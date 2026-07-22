@@ -48,6 +48,16 @@ for (var i = 0; i < args.Length - 1; i++)
 // linear-warmup→cosine LR + tuned Adam). It only strengthens the baseline (AlgFormer is untouched); combine with
 // the multi-task default, --lm, or --codec-baseline. Run each headline task once with and once without the flag.
 var tuned = args.Contains("--tuned-baseline");
+if (args.Contains("--tok"))   // show how a string tokenises under the current vocab — verify long-addition scratchpad stays single-digit
+{
+    var s = string.Join(' ', args.SkipWhile(a => a != "--tok").Skip(1));
+    if (s.Length == 0) s = "10 + 14 = 0+4+0=4c0 1+1+0=2c0 = 24";
+    var vv = new CharVocab();
+    var ids = vv.Encode(s);
+    Console.WriteLine($"input:  \"{s}\"");
+    Console.WriteLine($"{ids.Length} tokens: " + string.Join(" | ", ids.Select(id => vv.Symbol(id).Replace("\n", "\\n"))));
+    return;
+}
 if (args.Contains("--sample")) { UpgradeBench.RunSample(args.SkipWhile(a => a != "--sample").Skip(1).ToArray()); return; }   // load checkpoint(s) + greedily generate — trained (coherent) vs fresh (garbage)
 if (args.Contains("--gradcheck")) { UpgradeBench.RunGradcheck(); return; }   // bitwise gradient checksum — must be unchanged by the scratch-reuse refactor
 if (args.Contains("--profile")) { UpgradeBench.RunProfile(); return; }   // training throughput/CPU-utilization/GC profiler (why the CPU doesn't saturate)

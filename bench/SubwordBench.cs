@@ -33,7 +33,14 @@ public static class SubwordBench
         IEnumerable<string> Segments() { foreach (var f in files) yield return File.ReadAllText(f); }
         long chars = 0; foreach (var f in files) chars += new FileInfo(f).Length;
 
-        var list = SubwordBuilder.FromSegments(Segments(), bi, tri, quad);
+        // Drop subwords that MIX digits with non-digits ("+4","=4","c0","1st","4 ="): those glue digits to operators/letters
+        // and scramble the single-digit arithmetic scratchpad. Keep PURE-digit ("47","00".."99") and pure-text subwords, so
+        // ≤99 numbers stay whole-number-face tokens while every digit inside the scratchpad stays a clean single char.
+        static List<string> CleanDigits(List<string> l) => l.Where(w => !(w.Any(char.IsDigit) && w.Any(ch => !char.IsDigit(ch)))).ToList();
+
+        var raw = SubwordBuilder.FromSegments(Segments(), bi, tri, quad);
+        var list = CleanDigits(raw);
+        Console.WriteLine($"  filtered {raw.Count - list.Count} mixed digit/text subwords (kept pure-digit + pure-text)");
         var v = new SubwordVocab(list);
         int L2 = list.Count(w => w.Length == 2), L3 = list.Count(w => w.Length == 3), L4 = list.Count(w => w.Length == 4);
         Console.WriteLine($"  corpus ~{chars / 1_000_000.0:F1} M chars  ->  {list.Count} subwords ({L2} bi, {L3} tri, {L4} quad)  |  total vocab {v.Size}");
@@ -60,7 +67,7 @@ public static class SubwordBench
         var quadOne = quadProbe != null && v.Encode(quadProbe).Length == 1;
         Check($"a known quadgram is ONE token (longest-match)  ({quadProbe ?? "none found"})", quadOne);
 
-        var list2 = SubwordBuilder.FromSegments(Segments(), bi, tri, quad);
+        var list2 = CleanDigits(SubwordBuilder.FromSegments(Segments(), bi, tri, quad));
         Check("regeneration is bit-identical (deterministic)", list2.SequenceEqual(list));
 
         var allDigits = Enumerable.Range(0, 100).All(n => list.Contains($"{n / 10}{n % 10}"));
