@@ -33,10 +33,19 @@ public static class SubwordBench
         IEnumerable<string> Segments() { foreach (var f in files) yield return File.ReadAllText(f); }
         long chars = 0; foreach (var f in files) chars += new FileInfo(f).Length;
 
-        // Drop subwords that MIX digits with non-digits ("+4","=4","c0","1st","4 ="): those glue digits to operators/letters
-        // and scramble the single-digit arithmetic scratchpad. Keep PURE-digit ("47","00".."99") and pure-text subwords, so
-        // ≤99 numbers stay whole-number-face tokens while every digit inside the scratchpad stays a clean single char.
-        static List<string> CleanDigits(List<string> l) => l.Where(w => !(w.Any(char.IsDigit) && w.Any(ch => !char.IsDigit(ch)))).ToList();
+        // NUMBER-CLEAN vocab so the single-digit arithmetic scratchpad tokenises consistently and the column algorithm can
+        // extrapolate. Keep only: pure-TEXT subwords, and pure-digit numbers of AT MOST 2 digits ("00".."99", the whole-number
+        // faces). DROP: mixed digit+text ("+4","=4","c0","1st" — they glue digits to operators/letters), and 3+ digit numbers
+        // ("156","1990" — they're an inconsistent big chunk the column algorithm would have to re-split). Every number then
+        // tokenises into uniform ≤2-digit chunks; every digit inside the scratchpad stays a clean single char.
+        static bool KeepSub(string w)
+        {
+            var digit = w.Count(char.IsDigit);
+            if (digit == 0) return true;                 // pure text — keep
+            if (digit != w.Length) return false;         // mixed digit+text — drop
+            return w.Length <= 2;                        // pure number — keep only 1..2 digits
+        }
+        static List<string> CleanDigits(List<string> l) => l.Where(KeepSub).ToList();
 
         var raw = SubwordBuilder.FromSegments(Segments(), bi, tri, quad);
         var list = CleanDigits(raw);
