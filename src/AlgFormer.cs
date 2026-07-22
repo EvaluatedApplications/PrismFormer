@@ -70,6 +70,12 @@ public sealed class AlgFormer
     /// <summary>Read-only copy of a token's current embedding row — for diagnostics (drift/compression analysis vs the codec seed).</summary>
     public double[] EmbRow(int id) => (double[])Emb[id].Clone();
 
+    /// <summary>Count of leading doubles in the Save/Load flat layout that are ENTIRELY frozen — the whole embedding block
+    /// (V·d doubles, which Save writes first) when codec-only (frozenPrefix ≥ Dim). Zero under a partial freeze, where the
+    /// frozen reals are interleaved per row and can't be skipped as one contiguous block. Lets the weight-bleed skip dead
+    /// weight so a slice always lands on a TRAINABLE parameter instead of an already-identical, deterministic frozen face.</summary>
+    public long FrozenDoublePrefix => _frozen >= _d ? (long)_v * _d : 0;
+
     // ---- gradient buffer (detached, mergeable) ----
     public sealed class Grads
     {

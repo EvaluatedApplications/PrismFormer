@@ -462,14 +462,19 @@ public sealed class StudioModel
     // ---- tiny elastic weight-averaging over the bleed channel: exchange a small random slice of params so peers slowly converge ----
     static byte[] SaveBytes(AlgFormer m) { using var ms = new MemoryStream(); var w = new BinaryWriter(ms); m.Save(w); w.Flush(); return ms.ToArray(); }
 
-    /// <summary>A small random slice of the model's params (start index + values) — tiny payload for a bleed.</summary>
+    /// <summary>A small random slice of the model's TRAINABLE params (start index + values) — tiny payload for a bleed.
+    /// Skips the frozen embedding block (the leading V·d doubles under codec-only): those faces are deterministic and
+    /// byte-identical on every node, so averaging them is a no-op that RestoreFrozen undoes anyway — ~71% of a random
+    /// bleed used to land there and do nothing. Now every slice lands on a weight that actually moves the model. The
+    /// wire format is unchanged (still start+vals), so a peer on an older build receives it fine.</summary>
     public (int Start, double[] Vals)? WeightSlice(Random rng, int count)
     {
         lock (_write)
         {
             var b = SaveBytes(_model); var n = (b.Length - 16) / 8;   // doubles after the 4-int header
-            if (n <= count) return null;
-            var start = rng.Next(n - count); var vals = new double[count];
+            var lo = (int)Math.Min(_model.FrozenDoublePrefix, n);     // first trainable double: skip the frozen embedding
+            if (n - lo <= count) return null;
+            var start = lo + rng.Next(n - lo - count); var vals = new double[count];
             for (var i = 0; i < count; i++) vals[i] = BitConverter.ToDouble(b, 16 + (start + i) * 8);
             return (start, vals);
         }
