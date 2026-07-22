@@ -148,7 +148,10 @@ public sealed class StudioModel
         // relay host. CPU model stays the source of truth (serve/bleed/save read it); the GPU just does fwd+bwd ~10x
         // faster. Falls back to CPU per-batch on any GPU error (e.g. a full-1024 window OOMing the card).
         GpuTrainer? gpu = null;
-        try { if (GpuDevice.HasGpu) { gpu = new GpuTrainer(_model); log($"[train] GPU acceleration ON — {GpuDevice.Describe}"); } else log("[train] no CUDA GPU — training on CPU"); }
+        // DEEP models need a smaller GPU sub-batch or they OOM (activation memory ∝ tokenBudget·Layers·Dim); the gradient
+        // is identical (same effective batch, just more sub-passes). Scale the budget down with depth so L32 stays on GPU.
+        var gpuBudget = Math.Clamp(48_000_000 / (PrismSpec.Layers * PrismSpec.Dim), PrismSpec.Context, 24576);
+        try { if (GpuDevice.HasGpu) { gpu = new GpuTrainer(_model, tokenBudget: gpuBudget); log($"[train] GPU acceleration ON — {GpuDevice.Describe} (tokenBudget {gpuBudget})"); } else log("[train] no CUDA GPU — training on CPU"); }
         catch (Exception e) { log("[train] GPU init failed → CPU: " + e.Message.Split('\n')[0]); gpu = null; }
         // FULL speed: no priority gimping (that was the ~60% CPU). EvalApp is data-parallel and schedules any overflow.
         // WARMUP: the first batch is TINY so feedback lands in seconds, then it doubles up to fill every core.

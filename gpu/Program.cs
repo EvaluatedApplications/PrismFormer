@@ -253,3 +253,47 @@ else if (mode == "train")
     Console.WriteLine(Acc() > 0.5 ? "\n  IT LEARNS ON GPU — the full GPU training path works end-to-end." : "\n  did not learn — investigate.");
     GpuDevice.Shutdown();
 }
+else if (mode == "reason")
+{
+    // Multi-step reasoning generalisation sweep (depth/width/chain/context), trained on the GPU. See GpuReason.
+    var passes = args.Length > 1 && int.TryParse(args[1], out var p) ? p : 120;
+    GpuReason.Run(passes);
+}
+else if (mode == "text")
+{
+    // Text language-model sizing sweep (depth/width/shifts/vocab), bits-per-char on BabyLM. See GpuText.  args: [batches] [ctx]
+    var batches = args.Length > 1 && int.TryParse(args[1], out var b) ? b : 400;
+    var tctx = args.Length > 2 && int.TryParse(args[2], out var t) ? t : 96;
+    GpuText.Run(batches, tctx);
+}
+else if (mode == "textone")
+{
+    // Train ONE text config. args: [batches] [ctx] [L] [frozen] [dm] [S] [growInit]  (frozen=dm → codec-only; growInit=1 → identity-init deep)
+    int A(int i, int def) => args.Length > i && int.TryParse(args[i], out var v) ? v : def;
+    GpuText.RunOne(A(1, 2500), A(2, 96), A(3, 6), A(5, 128), A(6, 64), A(4, -1), A(7, 0) == 1);
+}
+else if (mode == "texttail")
+{
+    // Tail-size sweep: how many learnable dims per token matter (0=codec-only .. 64). See GpuText.RunTail. args: [batches] [ctx] [L]
+    int A(int i, int def) => args.Length > i && int.TryParse(args[i], out var v) ? v : def;
+    GpuText.RunTail(A(1, 800), A(2, 96), A(3, 6));
+}
+else if (mode == "textdepth")
+{
+    // Depth × freeze grid: does depth close the codec-only gap, and does a tiny tail beat pure codec? See RunDepthFreeze. args: [batches] [ctx]
+    int A(int i, int def) => args.Length > i && int.TryParse(args[i], out var v) ? v : def;
+    GpuText.RunDepthFreeze(A(1, 600), A(2, 96));
+}
+else if (mode == "recall")
+{
+    // In-context recall (remember who-said-what) sizing sweep — depth/width/K/context. See GpuRecall. args: [passes]
+    var passes = args.Length > 1 && int.TryParse(args[1], out var p) ? p : 80;
+    GpuRecall.Run(passes);
+}
+else if (mode == "fit")
+{
+    // Training-fit probe: how big/deep a model trains on this GPU. args: d L c tok  [S] [V] [bs]  (one config per process)
+    int A(int i, int def) => args.Length > i && int.TryParse(args[i], out var v) ? v : def;
+    // Run(d, L, c, tok, V, S, bs)
+    GpuFit.Run(A(1, 256), A(2, 12), A(3, 256), A(4, 24576), A(5, 4096), A(6, 64), A(7, 128));
+}

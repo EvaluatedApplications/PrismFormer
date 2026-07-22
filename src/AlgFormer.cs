@@ -67,6 +67,9 @@ public sealed class AlgFormer
     public int Layers => _layers;
     public long ParamCount => Pairs(NewGrads()).Sum(p => (long)p.param.Length);
 
+    /// <summary>Read-only copy of a token's current embedding row — for diagnostics (drift/compression analysis vs the codec seed).</summary>
+    public double[] EmbRow(int id) => (double[])Emb[id].Clone();
+
     // ---- gradient buffer (detached, mergeable) ----
     public sealed class Grads
     {

@@ -259,41 +259,67 @@ public static class UpgradeBench
     public static void RunSpec(int oldContext = 512, int oldShifts = 64)
     {
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
-        const int oldVocab = CharVocab.N, L = 8;   // "old on disk" = the char-level model before the bump
         var D = PhasorCodec.Dim; var frozen = PhasorCodec.FrozenReals;
         var v = new CharVocab();
-        double[] Seed(int w) => PhasorCodec.Encode(v.Symbol(w));   // char OR subword face — valid for both the v96 old and the v-full new model
-        int[] Chars(string s) => s.Select(c => v.Id(c)).ToArray();  // CHAR ids only, so the v96 old model never sees a subword id
+        double[] Seed(int w) => PhasorCodec.Encode(v.Symbol(w));
+        int[] Chars(string s) => s.Select(c => v.Id(c)).ToArray();
 
         Console.WriteLine($"current spec Signature = {PrismSpec.Signature}");
-        var oldSig = $"{PrismSpec.Version}/v{oldVocab}/d{D}/f{frozen}/c{oldContext}/L{L}/S{oldShifts}";
-        var old = PrismSpec.Parse(oldSig);
-        Console.WriteLine($"old-on-disk Signature  = {oldSig}");
-        Console.WriteLine($"CanUpgradeFrom(old)    = {(old != null && PrismSpec.CanUpgradeFrom(old))}");
 
-        // "old" char-level model at the old context/shifts, given some non-trivial training so weights aren't all-init
-        var a = new AlgFormer(oldVocab, shifts: oldShifts, layers: L, maxContext: oldContext, dModel: D, frozenPrefix: frozen, embedSeed: Seed, seed: 1);
-        var corpus = Chars(new string(LoadCorpus(60_000).Select(c => c >= 32 && c <= 126 ? c : ' ').ToArray()));
-        var rng = new Random(1);
-        var data = Enumerable.Range(0, 300).Select(_ => { var p = 40 + rng.Next(corpus.Length - 41); return (corpus[(p - 40)..p], corpus[p]); }).ToList();
-        a.Train(data, 2, batchSize: 64, baseLr: 1.5e-3, seed: 1);
+        // Same-version dim bump (Shifts/Context/Vocab growth) → UPGRADE path: char knowledge must carry over byte-clean.
+        var upSig = $"{PrismSpec.Version}/v{CharVocab.N}/d{D}/f{PrismSpec.FrozenPrefix}/c{oldContext}/L{PrismSpec.Layers}/S{oldShifts}";
+        var up = PrismSpec.Parse(upSig);
+        if (up != null && PrismSpec.CanUpgradeFrom(up))
+        {
+            Console.WriteLine($"mode = UPGRADE-IN-PLACE (same Version, growable dims)");
+            var a = new AlgFormer(CharVocab.N, shifts: oldShifts, layers: PrismSpec.Layers, maxContext: oldContext, dModel: D, frozenPrefix: PrismSpec.FrozenPrefix, embedSeed: Seed, seed: 1);
+            var corpus = Chars(new string(LoadCorpus(60_000).Select(c => c >= 32 && c <= 126 ? c : ' ').ToArray()));
+            var rng = new Random(1);
+            var data = Enumerable.Range(0, 300).Select(_ => { var p = 40 + rng.Next(corpus.Length - 41); return (corpus[(p - 40)..p], corpus[p]); }).ToList();
+            a.Train(data, 2, batchSize: 64, baseLr: 1.5e-3, seed: 1);
+            var prompt = Chars("user: hello there\nprism: ");
+            var la = a.LogitsFor(prompt);
+            var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, true)) a.Save(w);
+            ms.Position = 0;
+            var b = PrismSpec.NewModel(Seed);
+            bool okUp; using (var r = new BinaryReader(ms, System.Text.Encoding.UTF8, true)) okUp = b.LoadUpgrade(r, oldContext);
+            var lb = b.LogitsFor(prompt);
+            var maxDiff = 0.0; for (var i = 0; i < CharVocab.N; i++) maxDiff = Math.Max(maxDiff, Math.Abs(la[i] - lb[i]));
+            Console.WriteLine($"LoadUpgrade ok         = {okUp}   identity max|Δlogit| over char range = {maxDiff:E3} (must ~0)");
+            Console.WriteLine(okUp && maxDiff < 1e-9 ? "  PASS — char knowledge carries over byte-clean. Safe to ship." : "  FAIL — drift or load error; DO NOT ship the bump.");
+            return;
+        }
 
-        var prompt = Chars("user: hello there\nprism: ");   // CHAR ids — valid for both old (v96) and new (v-full)
-        var la = a.LogitsFor(prompt);
+        // HARD FORK (Version bump and/or non-growable dim change) → the contract is DISCARD-and-rebuild, not upgrade.
+        // Verify: (1) a prior-prod checkpoint is REJECTED by the load guard (so every node boots fresh, no crash);
+        //         (2) fresh init is DETERMINISTIC (every node builds byte-identical weights → index-based merge is valid);
+        //         (3) the deep identity-init model does a CLEAN forward (finite logits — the ReZero deep stack is sane).
+        Console.WriteLine("mode = HARD FORK (Version/non-growable-dim change → discard old, rebuild fresh)");
+        bool GuardAccepts(string sig)   // exactly the StudioModel.Load decision (sig checked before any weights)
+        {
+            if (sig == PrismSpec.Signature) return true;
+            var o = PrismSpec.Parse(sig);
+            return o != null && PrismSpec.CanUpgradeFrom(o);
+        }
+        var priors = new[] { "PRISM-2/v4096/d256/f64/c1024/L8/S256", "PRISM-2/v96/d256/f64/c256/L8/S64", "PRISM-1/v96/d256/f64/c256/L8/S32" };
+        var allRejected = priors.All(s => !GuardAccepts(s));
+        Console.WriteLine($"(1) prior-prod checkpoints rejected on load (discard→fresh): {allRejected}");
+        foreach (var s in priors) Console.WriteLine($"      {(GuardAccepts(s) ? "ACCEPT" : "reject")}  {s}");
 
-        var ms = new MemoryStream();
-        using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, true)) a.Save(w);
-        ms.Position = 0;
-        var b = new AlgFormer(PrismSpec.Vocab, shifts: PrismSpec.Shifts, layers: PrismSpec.Layers, maxContext: PrismSpec.Context, dModel: D, frozenPrefix: frozen, embedSeed: Seed, seed: PrismSpec.InitSeed);
-        bool okUp; using (var r = new BinaryReader(ms, System.Text.Encoding.UTF8, true)) okUp = b.LoadUpgrade(r, oldContext);
-        var lb = b.LogitsFor(prompt);
+        var m1 = PrismSpec.NewModel(Seed); var m2 = PrismSpec.NewModel(Seed);
+        var b1 = m1.Serialize(); var b2 = m2.Serialize();
+        var deterministic = b1.Length == b2.Length && b1.AsSpan().SequenceEqual(b2);
+        Console.WriteLine($"(2) fresh init is deterministic (byte-identical across nodes): {deterministic}   ({b1.Length:N0} bytes, {m1.ParamCount:N0} params, L{PrismSpec.Layers})");
 
-        // compare over the OLD vocab range (the preserved region): char rows + forward must be byte-identical, and the
-        // new subword/shift rows must not perturb a char-token forward (subword rows unused, new shift rows are zero).
-        var maxDiff = 0.0; for (var i = 0; i < oldVocab; i++) maxDiff = Math.Max(maxDiff, Math.Abs(la[i] - lb[i]));
-        Console.WriteLine($"LoadUpgrade ok         = {okUp}   (v{oldVocab}/c{oldContext}/S{oldShifts} -> v{PrismSpec.Vocab}/c{PrismSpec.Context}/S{PrismSpec.Shifts})");
-        Console.WriteLine($"identity check         = max|logit_old - logit_new| over char range = {maxDiff:E3}  (char knowledge must carry over -> ~0)");
-        Console.WriteLine(okUp && maxDiff < 1e-9 ? "  PASS — char knowledge carries over byte-clean; new shift/subword rows are identity at init. Safe to ship." : "  FAIL — drift or load error; DO NOT ship the bump.");
+        var lg = m1.LogitsFor(Chars("user: hello there\nprism: "));
+        var finite = lg.All(x => !double.IsNaN(x) && !double.IsInfinity(x));
+        var spread = lg.Max() - lg.Min();
+        Console.WriteLine($"(3) deep identity-init forward is clean: finite={finite}  logit spread={spread:F3} (nonzero, not NaN)");
+
+        Console.WriteLine(allRejected && deterministic && finite
+            ? "  PASS — old checkpoints discarded, fresh init deterministic, deep model forward-clean. Safe to ship the fork (nodes rebuild on boot)."
+            : "  FAIL — fork contract violated; do NOT ship.");
     }
 
     // ── EXPERIMENT: is a LAYER add non-destructive AND trainable? A naive all-zero layer is identity at init but its

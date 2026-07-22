@@ -19,24 +19,33 @@ namespace PrismFormer;
 /// </summary>
 public static class PrismSpec
 {
-    // PRISM-2: CAUSAL attention (was PRISM-1 bidirectional). Same dims — a mask + KV-cache change, not a reshape — but the
-    // weights mean something different, so PRISM-2 must not merge with / load PRISM-1 checkpoints. Bumping Version changes
-    // Signature, so old checkpoints are rejected on load (start fresh); the Studio "Reset model" button wipes them explicitly.
-    public const string Version = "PRISM-2";
+    // PRISM-3: the DEEP CODEC-ONLY reset. Hard fork from PRISM-2 (was L8 / S256 / c1024 / f64 learned-tail). Now a 32-layer
+    // stack with a FULLY FROZEN codec embedding (FrozenPrefix = Dim → zero learned tail; every token IS its spelling's face),
+    // a large 30k subword vocab (near-free because frozen), a shorter 512 window to fund depth, and S64 to keep deep training
+    // tractable. The deep stack is IDENTITY-INIT (ReZero/Fixup: layers 1..L start with zeroed residual output projections) so
+    // it is trainable from scratch instead of a cold all-random init. Version bump changes Signature → PRISM-2 checkpoints are
+    // rejected on load (every node discards + rebuilds fresh on boot); the Studio "Reset model" button wipes them explicitly.
+    public const string Version = "PRISM-3";
 
-    public static int Vocab => CharVocab.Total;          // 96 chars + committed subword n-grams (append-only). Char ids 0..95 are fixed forever; subwords append after, so vocab GROWS in place.
-    public const int Context = 1024;                     // 1024 characters of context (~170 words / a paragraph of chat) — grown in place 256→512→1024 (older checkpoints zero-pad up via LoadUpgrade); cheap on params + everyday serve, but O(T²) attention when the window is actually FILLED
-    public const int Layers = 8;                         // depth
-    public const int Shifts = 256;                       // relation-bank rank (S) — grown 64→256 (max, = Dim) in place via LoadUpgrade (new shift rows zero-pad, identity-preserving). ~4x the S64 bank compute.
-    public const int InitSeed = 1;                       // canonical init seed
+    public static int Vocab => CharVocab.Total;          // 96 chars + ~30.6k subword n-grams. Char ids 0..95 fixed forever; codec-only means EVERY row is frozen at its codec face → a big vocab costs only storage + softmax, no training.
+    public const int Context = 512;                      // 512 characters of context (~85 words) — halved from 1024 to fund depth (context and depth both consume activation memory on a 6GB card)
+    public const int Layers = 32;                        // DEPTH — the lever we max. Identity-init (see NewModel) makes a 32-deep stack trainable. ~L16-48 fit the 6GB card (activation-bound); L32 trains ~7.6s/batch on an RTX A3000.
+    public const int Shifts = 64;                        // relation-bank rank (S) — kept modest so deep training stays tractable (banks = 7·S·Dim·Layers); shifts don't affect the depth ceiling (activation mem is S-independent)
+    public const int InitSeed = 1;                       // canonical init seed (all nodes must init byte-identically for index-based merge)
 
     public static int Dim => PhasorLayout.Dim;           // 256 reals (= 128 complex components x 2) — frozen by the phasor codec (PhasorLayout)
-    public static int FrozenPrefix => PhasorLayout.FrozenReals;  // 64 — frozen identity prefix
+    public static int FrozenPrefix => Dim;               // CODEC-ONLY: freeze the WHOLE embedding (= Dim) → zero learned tail; every token is exactly its codec face, so vocab is free to grow
 
-    /// <summary>Build THE production model. <paramref name="embedSeed"/> supplies the phasor codec's per-symbol seed
-    /// (pass PhasorCodec.Encode over the char vocab); pass null for a bare-init model.</summary>
+    /// <summary>Build THE production model — a DEEP identity-init stack. <paramref name="embedSeed"/> supplies the phasor
+    /// codec's per-symbol seed (pass PhasorCodec.Encode over the vocab); pass null for a bare-init model. The stack is built
+    /// 1-layer-then-<see cref="AlgFormer.GrowLayers"/>-to-Layers so layers 1..Layers-1 start as the IDENTITY (zeroed residual
+    /// output projections, ReZero/Fixup) — this is what makes a 32-deep model trainable from scratch. Deterministic, so every
+    /// node produces a byte-identical fresh model (required for index-based gradient/weight merge).</summary>
     public static AlgFormer NewModel(Func<int, double[]>? embedSeed = null)
-        => new(Vocab, shifts: Shifts, layers: Layers, maxContext: Context, dModel: Dim, frozenPrefix: FrozenPrefix, embedSeed: embedSeed, seed: InitSeed);
+    {
+        var m = new AlgFormer(Vocab, shifts: Shifts, layers: 1, maxContext: Context, dModel: Dim, frozenPrefix: FrozenPrefix, embedSeed: embedSeed, seed: InitSeed);
+        return Layers > 1 ? m.GrowLayers(Layers - 1, zeroOutputOnly: true, seed: InitSeed) : m;
+    }
 
     /// <summary>Compact tag written into checkpoints so an incompatible model is rejected rather than silently mis-merged.</summary>
     public static string Signature => $"{Version}/v{Vocab}/d{Dim}/f{FrozenPrefix}/c{Context}/L{Layers}/S{Shifts}";
