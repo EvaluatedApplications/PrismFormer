@@ -67,8 +67,8 @@ Write-Host ("binary: {0} ({1:N0} bytes)" -f $bin, (Get-Item $bin).Length)
 
 # STOP FIRST — free the core before we transfer, so the (busy) box can actually service the scp. Retry hard: this short
 # command is the one that has to punch through the saturated sshd; once it lands, the service is down and the rest is calm.
-Write-Host "== stop service (frees the core so the transfer can land) ==" -ForegroundColor Cyan
-Remote "sudo systemctl stop '$Service'; echo '  stopped'" -tries 40
+Write-Host "== stop + DISABLE service (frees the core AND breaks any OOM crash-loop so it can't re-peg mid-deploy) ==" -ForegroundColor Cyan
+Remote "sudo systemctl stop '$Service' 2>/dev/null; sudo systemctl disable '$Service' 2>/dev/null; echo '  stopped + disabled'" -tries 60
 
 Write-Host "== upload to /tmp/prismgym.new ==" -ForegroundColor Cyan
 Upload $bin "/tmp/prismgym.new" -tries 10
@@ -81,11 +81,21 @@ sudo mv /tmp/prismgym.new '$RemoteBin'
 sudo chown ubuntu:ubuntu '$RemoteBin'
 sudo chmod +x '$RemoteBin'
 $wipe
+# FREE-TIER RAM FIT: Workstation GC (leaner than Server on 1 vCPU), a hard heap cap (~480 MB), and max memory conservation.
+sudo mkdir -p /etc/systemd/system/${Service}.service.d
+sudo tee /etc/systemd/system/${Service}.service.d/gc.conf >/dev/null <<'GCCONF'
+[Service]
+Environment=DOTNET_gcServer=0
+Environment=DOTNET_GCHeapHardLimit=0x1E000000
+Environment=DOTNET_GCConserveMemory=9
+GCCONF
+sudo systemctl daemon-reload
+sudo systemctl enable '$Service' >/dev/null 2>&1
 sudo systemctl start '$Service'
-echo '  service (re)started'
+echo '  (re)started with Workstation GC + 480 MB heap cap + conserve-memory'
 "@ -tries 5
 
-Write-Host "== verify ==" -ForegroundColor Cyan
-Start-Sleep -Seconds 4
-Remote "echo -n '  active: '; systemctl is-active '$Service'; journalctl -u '$Service' --no-pager -n 12 | grep -iaE 'anchor node . spec|joined the mesh' | tail -3"
+Write-Host "== verify (spec + does it FIT + stay under 1 load?) ==" -ForegroundColor Cyan
+Start-Sleep -Seconds 8
+Remote "echo -n '  active: '; systemctl is-active '$Service'; echo -n '  load(1/5/15, <1=ok): '; cut -d' ' -f1-3 /proc/loadavg; echo '  mem MB:'; free -m | head -2; echo '  proc rss-kb/cpu%:'; ps -o rss=,pcpu=,comm= -C prismgym; journalctl -u '$Service' --no-pager -n 15 | grep -iaE 'anchor node . spec|weight-average|peer' | tail -3"
 Write-Host "== done ==" -ForegroundColor Green

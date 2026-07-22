@@ -148,34 +148,24 @@ public static class HeadlessNode
         Console.CancelKeyPress += (_, e) => { e.Cancel = true; Log("Ctrl-C — stopping…"); cts.Cancel(); };
 
         var chatter = new SwarmChatter(room,
-            // DECISION: the anchor is a PURELY PASSIVE relay — it does NOT answer queries and does NOT train. On this box
-            // (1 vCPU) the backprop-on-wrong path ran a full Predict forward on every bled pair AND every query-context pair,
-            // unbounded by the mesh rate — that pinned the core at 100% and starved sshd (couldn't even deploy). So the anchor
-            // now only: relays gossip, averages in peers' weights (cheap, no gradients), and carries group-chat context.
-            // The trained PEERS do the learning; the anchor just keeps the mesh discoverable and the consensus weights flowing.
-            _ => (0.0, ""),
-            model.AddGossipPair,   // relay-only: persist + gossip the bled pair onward — NO forward pass, NO backprop
-            (start, vals) => Task.Run(() => model.MergeWeightSlice(start, vals, 0.05)), Log,
-            onGroup: (h, t) => model.AppendGroup(h, t), signature: PrismSpec.Signature);   // carries group-chat context; does NOT learn from it
+            // WEIGHT-AVERAGE-ONLY hub (free-tier anchor). The ONLY job is to average peers' weight slices in and share ours
+            // back — the elastic-averaging consensus that carries skills across the swarm. Everything else is dropped: no
+            // answering, no training, no gossip-persist/relay, no group-chat context. At v4096 the model is 4x bigger and
+            // this box is 1 vCPU / ~1 GB, so every extra role is shed to keep RAM (and the broker) alive. Peers do the rest.
+            _ => (0.0, ""),                                                                 // never answers a query
+            (_, __) => { },                                                                 // no gossip persist/relay
+            (start, vals) => Task.Run(() => model.MergeWeightSlice(start, vals, 0.05)), Log, // the one job: average peers' weights in
+            signature: PrismSpec.Signature);                                                // no onGroup / groupServe / absorbContext
         chatter.Start();
-        Log("joined the mesh — PASSIVE relay: gossip + weight-average only (no answering, no training — CPU stays free)");
+        Log("joined the mesh — WEIGHT-AVERAGE-ONLY hub (receive + send weight slices; no gossip, group, answering or training)");
 
         var bleed = new System.Threading.Timer(_ =>
         {
-            try   // PASSIVE but ACTIVE-DRIVER: share what we ALREADY have + drive the chat by querying peers. No gradient steps — the anchor never trains.
+            try   // WEIGHT-AVERAGE-ONLY: keep the directory consistent and push our averaged weights out. No pairs, no chat, no gradients.
             {
                 Log($"[mesh] {chatter.PeerCount} peer(s) nearby");
-                chatter.BroadcastRoster();   // directory: push the full membership so every (updated) node sees a consistent peer count
-                if (model.WeightSlice(Random.Shared, 1024) is { } ws) chatter.ShareWeightSlice(ws.Start, ws.Vals);
-                if (model.RandomPair(Random.Shared) is { } p) chatter.SharePair(p.Prompt, p.Target);
-                // Always-on chat driver: take a natural prefix of the GROUP chat context we've been accumulating and ask a
-                // peer "what would you say here?" — like the worker's bleed-chat, EXCEPT we don't distil the reply (that's
-                // training). Cheap for us (we only SEND the ask); the PEER, being asked, learns from the human turns the
-                // context carries (_absorbContext on the query side). So the anchor keeps the group conversation — and
-                // everyone else's learning — ticking during idle time without ever touching the corpus or a gradient.
-                var q = model.RandomPrompt(Random.Shared);
-                if (!string.IsNullOrWhiteSpace(q) && chatter.AskSwarm(q, 8000) is { } a && a.Continuation.Trim().Length > 0)
-                    Log("[chat] asked a peer to continue the group context (it learns from the human turns; we don't distil)");
+                chatter.BroadcastRoster();   // directory: push the full membership so every node sees a consistent peer count
+                if (model.WeightSlice(Random.Shared, 1024) is { } ws) chatter.ShareWeightSlice(ws.Start, ws.Vals);   // send our consensus weights
             }
             catch (Exception e) { Log("[bleed] " + e.Message.Split('\n')[0]); }
         }, null, 30000, 30000);
