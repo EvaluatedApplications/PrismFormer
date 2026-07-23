@@ -89,9 +89,19 @@ public sealed class PairSource : IJobSource
         {
             if (string.IsNullOrEmpty(t)) continue;
             var prompt = p.EndsWith(" ") ? p : p + " ";   // guarantee a space between prompt and target so words don't mush ("frigidfreezing")
-            var body = Vocab.Encode(prompt + t);
-            var full = new int[body.Length + 1]; Array.Copy(body, full, body.Length); full[^1] = CharVocab.End;   // explicit STOP token after the answer (Q&A + chat) → REPL stops here; corpus stays pure next-token
-            _pairs.Add((full, prompt.Length));
+            // Encode prompt and target SEPARATELY. PromptLen must be the prompt's TOKEN span (the index in `full` where the
+            // target begins), NOT its character count. Under the char vocab those were equal; under the subword vocab they
+            // are NOT — storing chars made Count = Σ(Full.Length − PromptLen) go NEGATIVE for long-prompt/short-target pairs,
+            // sinking whole lanes to Count≤0 so they were silently DROPPED, and mis-aligning GetExample's predict index for
+            // the ones that survived. Separate encoding also keeps the prompt|target seam tokenised the way generation primes
+            // it at inference (prompt encoded on its own), so train and serve agree.
+            var pTok = Vocab.Encode(prompt);
+            var tTok = Vocab.Encode(t);
+            var full = new int[pTok.Length + tTok.Length + 1];
+            Array.Copy(pTok, full, pTok.Length);
+            Array.Copy(tTok, 0, full, pTok.Length, tTok.Length);
+            full[^1] = CharVocab.End;   // explicit STOP token after the answer (Q&A + chat) → REPL stops here; corpus stays pure next-token
+            _pairs.Add((full, pTok.Length));
         }
         _cum = new long[_pairs.Count + 1];
         for (var i = 0; i < _pairs.Count; i++) _cum[i + 1] = _cum[i] + (_pairs[i].Full.Length - _pairs[i].PromptLen);
