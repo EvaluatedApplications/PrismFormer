@@ -30,6 +30,8 @@
   .\scripts\deploy-worker.ps1 -Server 20.0.0.5 -User azureuser        # Azure box, seed from the anchor
   .\scripts\deploy-worker.ps1 -Server 20.0.0.5 -SeedFrom "$env:LOCALAPPDATA\Prism\prism.bin"  # seed from local
   .\scripts\deploy-worker.ps1 -Server 20.0.0.5 -SkipPublish           # reuse the last publish (fast redeploy)
+  # PASSIVE weight-share hub (no training): runs `anchor` mode, holds a copy of YOUR model, bleeds/absorbs weights only.
+  .\scripts\deploy-worker.ps1 -Server 20.42.102.22 -Passive -SeedFrom "$env:LOCALAPPDATA\Prism\prism.bin"
 #>
 param(
   [Parameter(Mandatory = $true)]
@@ -42,6 +44,7 @@ param(
   [string]$AnchorCheckpoint = "/home/ubuntu/.local/share/Prism/prism-anchor.bin",
   [string]$Service          = "prism-worker",
   [switch]$SkipPublish,
+  [switch]$Passive,                                                 # PASSIVE weight-share only: run `anchor` (no curriculum training), just hold the model + bleed/absorb weights
   [switch]$NoBackup,                                                 # skip the periodic worker->anchor checkpoint backup
   [string]$AnchorBackupDir  = "/home/ubuntu/worker-backups",        # anchor folder for worker backups (NEVER the anchor's own model)
   [string]$BackupEvery      = "30min"                               # systemd timer interval for the backup push
@@ -63,6 +66,17 @@ $Node       = "prism-" + (($Server -replace '[^0-9A-Za-z]','-').Trim('-'))   # u
 
 # explicit colony room code (base64 of "PZR1;<room>") — passed to headless so systemd never has to quote an empty arg
 $RoomCode = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("PZR1;prism-colony"))
+
+# PASSIVE mode: run `anchor` (holds the model, bleeds/absorbs weight slices, NO curriculum training). anchor loads/saves
+# prism-anchor.bin (not prism-headless.bin), takes only the room arg, and needs no curriculum corpus.
+if ($Passive) {
+  $RemoteCkpt = "$RemoteDir/prism-anchor.bin"
+  $ExecArgs   = "anchor ${RoomCode}"
+  $SvcDesc    = "Prism passive node (weight-share only, no training)"
+} else {
+  $ExecArgs   = "headless ${RoomCode} ${RemoteData}"
+  $SvcDesc    = "Prism worker node (headless swarm trainer)"
+}
 
 $sshWorker = @("-i", $Key, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=15")
 $sshAnchor = $sshWorker
@@ -135,25 +149,31 @@ if ($SeedFrom -eq "anchor") {
 $seedSig = CheckpointSignature $localSeed
 Write-Host ("  seed OK - spec {0}, {1:N0} bytes" -f $seedSig, (Get-Item $localSeed).Length) -ForegroundColor Green
 
-# ── 3. package the curriculum ───────────────────────────────────────────────────────────────────────────
-Write-Host "== package curriculum (studio/PrismStudio/data) ==" -ForegroundColor Cyan
-if (-not (Test-Path $dataSrc)) { throw "curriculum folder not found: $dataSrc" }
-if (Test-Path $localData) { Remove-Item $localData -Force }
-tar -czf $localData -C $dataSrc .          # archive the CONTENTS (pairs/ text/ gossip/) so it expands into prism-data/
-if ($LASTEXITCODE -ne 0) { throw "tar of the curriculum failed" }
-Write-Host ("  data: {0:N0} bytes" -f (Get-Item $localData).Length)
+# ── 3. package the curriculum (skipped for passive nodes — they never train) ────────────────────────────
+if (-not $Passive) {
+  Write-Host "== package curriculum (studio/PrismStudio/data) ==" -ForegroundColor Cyan
+  if (-not (Test-Path $dataSrc)) { throw "curriculum folder not found: $dataSrc" }
+  if (Test-Path $localData) { Remove-Item $localData -Force }
+  tar -czf $localData -C $dataSrc .          # archive the CONTENTS (pairs/ text/ gossip/) so it expands into prism-data/
+  if ($LASTEXITCODE -ne 0) { throw "tar of the curriculum failed" }
+  Write-Host ("  data: {0:N0} bytes" -f (Get-Item $localData).Length)
+} else {
+  Write-Host "== passive node: skipping curriculum (no training) ==" -ForegroundColor DarkGray
+}
 
 # ── 4. stop service (frees the binary lock), then upload everything ──────────────────────────────────────
 Write-Host "== stop any running worker + prep dirs ==" -ForegroundColor Cyan
 Remote "sudo systemctl stop '$Service' 2>/dev/null; mkdir -p '$RemoteDir' '$RemoteData'; echo '  ready'"
 
-Write-Host "== upload binary + seed + curriculum ==" -ForegroundColor Cyan
+Write-Host "== upload binary + seed$(if (-not $Passive) {' + curriculum'}) ==" -ForegroundColor Cyan
 Upload $bin       "/tmp/prismgym.new"
 Upload $localSeed "/tmp/prism-seed.bin"
-Upload $localData "/tmp/prism-data.tgz"
+if (-not $Passive) { Upload $localData "/tmp/prism-data.tgz" }
 
 # ── 5. install (atomic seed install), write unit, start ─────────────────────────────────────────────────
 Write-Host "== install + (re)start service ==" -ForegroundColor Cyan
+# curriculum extract only for training workers; passive nodes get an empty block
+$CurriculumBlock = if ($Passive) { "" } else { "tar -xzf /tmp/prism-data.tgz -C '$RemoteData'`nchown -R ${User}:${User} '$RemoteData'" }
 Remote @"
 set -e
 # binary
@@ -164,13 +184,11 @@ sudo chmod +x '$RemoteBin'
 cp -f /tmp/prism-seed.bin '$RemoteDir/.seed.tmp'
 mv -f '$RemoteDir/.seed.tmp' '$RemoteCkpt'
 chown ${User}:${User} '$RemoteCkpt'
-# curriculum
-tar -xzf /tmp/prism-data.tgz -C '$RemoteData'
-chown -R ${User}:${User} '$RemoteData'
-# systemd unit — auto-joins the colony (broker+room default to the anchor); grinds prism-data on all cores
+$CurriculumBlock
+# systemd unit — auto-joins the colony (broker+room default to the anchor)
 sudo tee /etc/systemd/system/${Service}.service >/dev/null <<UNIT
 [Unit]
-Description=Prism worker node (headless swarm trainer)
+Description=${SvcDesc}
 After=network-online.target
 Wants=network-online.target
 
@@ -179,7 +197,7 @@ Type=simple
 User=${User}
 Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 Environment=PRISM_EVALAPP_KEY=
-ExecStart=${RemoteBin} headless ${RoomCode} ${RemoteData}
+ExecStart=${RemoteBin} ${ExecArgs}
 Restart=always
 RestartSec=5
 Nice=0
@@ -221,7 +239,7 @@ Write-Host "== worker is on the mesh ==" -ForegroundColor Green
 ($log -split "`n" | Select-String -Pattern 'spec |loaded|seeded from|joined swarm|params' | Select-Object -Last 6) | ForEach-Object { Write-Host "  $_" }
 
 # ── 7. DURABLE BACKUP: worker pushes its OWN checkpoint to the anchor (restricted key; never touches prism-anchor.bin) ──
-if (-not $NoBackup) {
+if (-not $NoBackup -and -not $Passive) {
   Write-Host "== set up periodic backup (worker -> anchor, restricted key) ==" -ForegroundColor Cyan
   try {
     $backupSh = @"
