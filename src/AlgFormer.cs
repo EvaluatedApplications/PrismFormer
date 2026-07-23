@@ -243,6 +243,29 @@ public sealed class AlgFormer
         w.Flush(); return ms.ToArray();
     }
 
+    /// <summary>True when the whole embedding is frozen (codec-only) — so it never changes after construction and a
+    /// per-batch GPU re-sync can skip re-sending it. See <see cref="SerializeTrainable"/>.</summary>
+    public bool EmbFrozen => _frozen >= _d;
+
+    /// <summary>Serialize ONLY the trainable parameters (Pos, C, banks) — same header + same order as <see cref="Serialize"/>
+    /// minus the leading (frozen) Emb block. The GPU trainer re-syncs weights every batch after the CPU Adam step; when the
+    /// embedding is frozen that re-send is ~V·d constant doubles of pure waste (the bulk of a codec-only checkpoint). This
+    /// path also iterates the param arrays DIRECTLY, so it skips the full-model <see cref="NewGrads"/> allocation that
+    /// <see cref="Serialize"/> makes just to enumerate. Pairs with GpuModel.UpdateTrainable. Only valid when
+    /// <see cref="EmbFrozen"/>; otherwise the embedding trains and the caller must use the full Serialize path.</summary>
+    public byte[] SerializeTrainable()
+    {
+        using var ms = new System.IO.MemoryStream();
+        var w = new System.IO.BinaryWriter(ms);
+        w.Write(_v); w.Write(_s); w.Write(_layers); w.Write(_maxT); w.Write(_d); w.Write(_frozen);
+        foreach (var row in Pos) foreach (var x in row) w.Write(x);   // Emb skipped (frozen); order matches Serialize minus Emb
+        foreach (var x in C) w.Write(x);
+        for (var l = 0; l < Ls.Length; l++)
+            foreach (var bank in new[] { Ls[l].Rq, Ls[l].Rk, Ls[l].Rv, Ls[l].Ro, Ls[l].A1, Ls[l].Ag, Ls[l].Ao })
+                foreach (var row in bank) foreach (var x in row) w.Write(x);
+        w.Flush(); return ms.ToArray();
+    }
+
     /// <summary>Reconstruct a model from <see cref="Serialize"/> bytes (config + parameters).</summary>
     public static AlgFormer Deserialize(byte[] bytes)
     {

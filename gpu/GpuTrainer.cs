@@ -29,7 +29,11 @@ public sealed class GpuTrainer : IDisposable
     public double TrainBatch(IReadOnlyList<(int[] Ctx, int Target)> batch, double lr)
     {
         if (batch.Count == 0) return 0;
-        _gpu.UpdateParams(_cpu.Serialize());   // pick up any external change (bleed/absorb) before computing grads
+        // Re-sync the GPU to the CPU weights (changed by last batch's Adam step, plus any bleed/absorb) before computing
+        // grads. Frozen embedding never changes → sync ONLY the trainable params (~70% less transfer + no full-model
+        // serialize/NewGrads on the CPU). Falls back to the full path if the embedding is trainable.
+        if (_cpu.EmbFrozen) _gpu.UpdateTrainable(_cpu.SerializeTrainable());
+        else _gpu.UpdateParams(_cpu.Serialize());
 
         var shortEx = new List<(int[] Ctx, int Target)>();
         var longEx = new List<(int[] Ctx, int Target)>();

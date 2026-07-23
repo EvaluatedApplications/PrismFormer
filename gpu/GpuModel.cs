@@ -125,6 +125,19 @@ public sealed partial class GpuModel : IDisposable
         for (var l = 0; l < _layers; l++) _banks[l].CopyFromCPU(Read(7 * _s * _d));
     }
 
+    /// <summary>Fast per-batch re-sync: upload ONLY the trainable params (pos, cbias, banks) from AlgFormer.SerializeTrainable
+    /// bytes, skipping the frozen embedding (constant → the emb uploaded at construction stays valid). ~70% less transfer +
+    /// no full-model serialize on the CPU side. Byte layout: header, then Pos, C, banks — no Emb.</summary>
+    public void UpdateTrainable(byte[] serialized)
+    {
+        using var r = new BinaryReader(new MemoryStream(serialized));
+        for (var i = 0; i < 6; i++) r.ReadInt32();   // header: v,s,layers,maxT,d,frozen
+        float[] Read(int n) { var a = new float[n]; for (var i = 0; i < n; i++) a[i] = (float)r.ReadDouble(); return a; }
+        _pos.CopyFromCPU(Read(_maxT * _d));
+        _cbias.CopyFromCPU(Read(_v));
+        for (var l = 0; l < _layers; l++) _banks[l].CopyFromCPU(Read(7 * _s * _d));
+    }
+
     public void Dispose()
     {
         _emb.Dispose(); _pos.Dispose(); _cbias.Dispose();
