@@ -156,20 +156,19 @@ public sealed class StudioModel
         // relay host. CPU model stays the source of truth (serve/bleed/save read it); the GPU just does fwd+bwd ~10x
         // faster. Falls back to CPU per-batch on any GPU error (e.g. a full-1024 window OOMing the card).
         GpuTrainer? gpu = null;
-        // Size the GPU sub-batch to fill ~85% of the card. Activation memory ∝ tokenBudget·Layers·Dim, so a deeper/wider
-        // model or a smaller card gets a proportionally smaller budget. Anchor: the old fixed 48M budget used ~55% of a
-        // 6 GB card at L32/d256, so scale that to the 85% target and to THIS card's VRAM (linear in activation memory; the
-        // fixed weight/optimiser footprint only makes us land a little UNDER 85%, never over). An OOM on some giant window
-        // still falls back to CPU for that batch, so overshoot is self-correcting.
+        // Size the GPU sub-batch to ~HALF the card. Filling it gave NO throughput win (training is compute-bound on the
+        // deep backward, not memory-bound), so leave the other half free rather than max it for nothing. Anchor: the old
+        // fixed 48M budget used ~55% of a 6 GB card at L32/d256; scale that to the 50% target and to THIS card's VRAM
+        // (activation memory ∝ tokenBudget·Layers·Dim). An OOM on some giant window still falls back to CPU per batch.
         try
         {
             if (GpuDevice.HasGpu)
             {
                 var vramMb = Math.Max(1024, GpuDevice.MemoryMb);
-                var budgetUnits = (long)(vramMb / 6144.0 * 74_000_000);   // 48M × (85/55) at 6 GB, scaled linearly to this card
+                var budgetUnits = (long)(vramMb / 6144.0 * (48_000_000 / 0.55 * 0.50));   // ~50% of the card (old 48M ≈ 55% of 6 GB)
                 var gpuBudget = (int)Math.Clamp(budgetUnits / (PrismSpec.Layers * PrismSpec.Dim), PrismSpec.Context, 24576);
                 gpu = new GpuTrainer(_model, tokenBudget: gpuBudget);
-                log($"[train] GPU acceleration ON — {GpuDevice.Describe} · sub-batch {gpuBudget} tok (~85% VRAM)");
+                log($"[train] GPU acceleration ON — {GpuDevice.Describe} · sub-batch {gpuBudget} tok (~50% VRAM)");
             }
             else log("[train] no CUDA GPU — training on CPU");
         }
