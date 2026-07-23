@@ -60,16 +60,24 @@ public sealed class StudioModel
         _snapshot = Clone(_model);
     }
 
-    static string Tail(string s, int n) => s.Length > n ? s[^n..] : s;   // keep the last n chars (rolling cap)
-
-    /// <summary>Roll a chat/group log to the recent context window: keep the last <paramref name="max"/> chars but cut at
-    /// a TURN boundary (drop the leading partial line) so it reloads clean. Both the group log and the REPL transcript are
-    /// capped to this — the saved context file is never larger than the model's context window.</summary>
-    public static string CapRecent(string t, int max)
+    /// <summary>Roll a chat/group log to the recent context window, measured in TOKENS. The model's context is
+    /// <paramref name="maxTokens"/> subword tokens (~3-4 chars each), so a CHARACTER cap — correct under the old char
+    /// vocab, wrong under the subword vocab — kept only about a third of the window the model can actually attend to.
+    /// Drop whole leading TURNS until the remaining tail fits the token budget, so it reloads clean at a turn boundary and
+    /// is never larger than the model's real context window. (We can't round-trip through Decode to count tokens on a
+    /// slice: Encode folds '\n' to space, which would destroy the turn boundaries the group parser depends on.)</summary>
+    public static string CapRecent(string t, int maxTokens)
     {
-        if (t.Length <= max) return t;
-        var i = t.IndexOf('\n', t.Length - max);   // first turn boundary at/after (len-max)
-        return i >= 0 && i + 1 < t.Length ? t[(i + 1)..] : t[^max..];
+        if (string.IsNullOrEmpty(t)) return t;
+        var v = new CharVocab();
+        if (v.Encode(t).Length <= maxTokens) return t;
+        var lines = t.Split('\n');
+        for (var start = 1; start < lines.Length; start++)   // drop leading turns until the tail fits (keeps newlines/turn boundaries)
+        {
+            var tail = string.Join("\n", lines[start..]);
+            if (v.Encode(tail).Length <= maxTokens) return tail;
+        }
+        return lines[^1];   // even the final turn alone exceeds the budget → keep just it (serve windows it in tokens anyway)
     }
 
     // canonical codec face for a token id — the FROZEN identity prefix holds its exact value; used to seed AND to restore
@@ -294,7 +302,7 @@ public sealed class StudioModel
 
     /// <summary>This node's group reply: continue the conversation in a HUMAN voice (all the model is trained to do) —
     /// prime the human slot on the recent context and generate ONE turn (stops at the STOP token). Posted as an AI turn.</summary>
-    public string GroupReply(string transcript) { var t = Tail(transcript ?? "", PrismSpec.Context); return GenerateCached(_snapshot, (t.Length == 0 || t.EndsWith("\n") ? t : t + "\n") + GroupChat.AiTag, 80); }   // NATURAL prime (no swap — see Serve)
+    public string GroupReply(string transcript) { var t = CapRecent(transcript ?? "", PrismSpec.Context); return GenerateCached(_snapshot, (t.Length == 0 || t.EndsWith("\n") ? t : t + "\n") + GroupChat.AiTag, 80); }   // NATURAL prime (no swap — see Serve); token-based cap like the group log
 
     /// <summary>Absorb a neighbour's bled pair. Always persists it to gossip (durable, trained next epoch). PLUS the
     /// swarmlearn "backprop-on-wrong" result: a bled pair is LABELLED, so if our current model does NOT already produce
