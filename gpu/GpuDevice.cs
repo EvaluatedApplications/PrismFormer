@@ -48,6 +48,9 @@ public static class GpuDevice
     /// <summary>Human-readable device line for logs — "NVIDIA RTX A3000 …" or "CPU (no CUDA GPU)".</summary>
     public static string Describe { get { Init(); return _acc is null ? "none (ILGPU unavailable)" : _acc.AcceleratorType == AcceleratorType.Cuda ? $"GPU: {_acc.Name} ({_acc.MemorySize / (1024 * 1024)} MB)" : "CPU (no CUDA GPU)"; } }
 
+    /// <summary>Total device memory in MB, for sizing the GPU sub-batch to the card. 0 if no accelerator.</summary>
+    public static long MemoryMb { get { Init(); return _acc is null ? 0 : _acc.MemorySize / (1024 * 1024); } }
+
     public static void Shutdown()
     {
         lock (_gate) { try { _acc?.Dispose(); _ctx?.Dispose(); } catch { } _acc = null; _ctx = null; _init = false; }
