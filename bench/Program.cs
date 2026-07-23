@@ -62,6 +62,7 @@ if (args.Contains("--sample")) { UpgradeBench.RunSample(args.SkipWhile(a => a !=
 if (args.Contains("--gradcheck")) { UpgradeBench.RunGradcheck(); return; }   // bitwise gradient checksum — must be unchanged by the scratch-reuse refactor
 if (args.Contains("--profile")) { UpgradeBench.RunProfile(); return; }   // training throughput/CPU-utilization/GC profiler (why the CPU doesn't saturate)
 if (args.Contains("--reason")) { ReasonBench.Run(passes: stepsArg ?? 120); return; }   // multi-step reasoning (word+number variable chains) generalisation to UNSEEN, swept over depth/width/context/chain-length
+if (args.Contains("--quantise")) { QuantiseBench.Run(passes: stepsArg ?? 200); return; }   // does the learned control quantise into crisp gate/attention regions on a crisp substrate vs a mushy one?
 if (args.Contains("--crosstalk")) { CrosstalkBench.Run(); return; }   // EMPIRICAL HRR capacity: how many bound pairs a dim-d face holds before decode breaks (sweeps dim x vocab) - does tiny dim suffice?
 if (args.Contains("--growlayer")) { UpgradeBench.RunGrowLayer(); return; }   // EXPERIMENT: non-destructive layer add (zero-output-projection = identity + live gradient) vs the naive all-zero (dead) control
 if (args.Contains("--spec")) { UpgradeBench.RunSpec(); return; }   // verify a c256 checkpoint LoadUpgrades into the current spec byte-clean (safe to ship the bump)
@@ -98,7 +99,7 @@ if (args.Contains("--speck")) { SpeckDistinguisherBench.Run(); return; }   // Pr
 if (args.Contains("--inspect")) { ResearchInspect.Run(); return; }   // targeted isolated addition, multi-seed averages, + face inspection (decode the model's internals) vs a transformer
 if (args.Contains("--columnar")) { ColumnarBench.Run(seeds: seedsArg ?? 4, steps: stepsArg ?? 15000, tuned: tuned); return; }   // end-to-end columnar addition: length extrapolation + per-column face inspection vs a transformer (--tuned-baseline strengthens the transformer)
 if (args.Contains("--subwords")) { SubwordBench.Run(args); return; }   // build the deterministic subword list (n-grams len 2..4) from the BabyLM corpus + self-verify the tokenizer (offline vocab-build step)
-if (args.Contains("--capacity")) { CapacityBench.Run(maxN: maxNArg ?? 2048, passes: stepsArg ?? 400, tuned: true, dModel: dModelArg ?? 128); return; }   // atomic capacity: size-matched SMALL transformer vs SMALL PrismFormer (codec intact, right-sized vocab) memorise the most random 2-symbol-key→value facts; concurrent, early-stop, geometric sweep 64..maxN
+if (args.Contains("--capacity")) { CapacityBench.Run(maxN: maxNArg ?? 2048, passes: stepsArg ?? 400, tuned: true, dModel: dModelArg ?? 128, noTail: args.Contains("--notail"), skipTransformer: args.Contains("--noxf")); return; }   // atomic capacity: size-matched SMALL transformer vs SMALL PrismFormer memorise the most random 2-symbol-key→value facts; --notail freezes the WHOLE embedding (codec-only) to test if facts live in the tail or the banks
 if (args.Contains("--extrap")) { ExtrapolationBench.Run(); return; }   // isolated capability: out-of-range magnitude extrapolation
 if (args.Contains("--lm")) { LanguageBench.Run(tuned: tuned); return; }             // isolated capability: character language modelling
 if (args.Contains("--scale")) { ScaleBench.Run(); return; }            // does it scale? held-out compute vs model size

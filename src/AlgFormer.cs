@@ -467,6 +467,22 @@ public sealed class AlgFormer
         return faces;
     }
 
+    /// <summary>Interpretability probe for "does the learned control QUANTISE into crisp regions?": run a forward pass and
+    /// return every sigmoid GATE activation (all layers × positions × dims) and the per-query ATTENTION peak (the max
+    /// weight over the positions it could attend to). Gates piled near 0/1 and attention peaks near 1.0 = crisp/quantised
+    /// control; gates around 0.5 and low peaks = soft/interpolating. Read-only; no effect on training or serving.</summary>
+    public (List<double> Gates, List<double> AttnPeak) ProbeControl(int[] toks)
+    {
+        var (_, caches) = ForwardAll(toks);
+        var gates = new List<double>(); var peak = new List<double>();
+        foreach (var c in caches)
+        {
+            foreach (var row in c.SigG) if (row != null) foreach (var g in row) gates.Add(g);   // sigmoid FFN gates
+            for (var t = 1; t < c.A.Length; t++) { var a = c.A[t]; if (a == null) continue; double mx = 0; for (var j = 0; j <= t && j < a.Length; j++) if (a[j] > mx) mx = a[j]; peak.Add(mx); }
+        }
+        return (gates, peak);
+    }
+
     // ── KV-cache incremental generation ──────────────────────────────────────────────────────────
     /// <summary>Per-generation state: cached per-layer K and V for every position placed so far. Because attention is
     /// CAUSAL, a past position's k/v never changes when a new token is appended, so generation is O(T) per token

@@ -36,8 +36,10 @@ public static class CapacityBench
     const int ValueSet = 256;     // value = 1 of 256 random tokens (v0..v255); arbitrary key→value; chance recall = 1/256
     const int KeyAlphabet = 128;  // FIXED, independent of maxN. RIGOUR: vocab (hence both models' param budget) stays IDENTICAL at every N and across every run, so the recall-vs-N curve is comparable run-to-run. 128^KeyLen = 16,384 distinct keys covers maxN into the low tens of thousands. (Was √maxN, which drifted the model size between runs.)
 
-    public static void Run(int maxN = 2048, int passes = 400, bool tuned = true, int dModel = 128)
+    public static void Run(int maxN = 2048, int passes = 400, bool tuned = true, int dModel = 128, bool noTail = false, bool skipTransformer = false)
     {   // dModel < PhasorCodec.Dim keeps the frozen codec identity + a learned tail (a genuine, smaller PrismFormer). AlgFormer supports it; the probe, Seed, and the training job below must all use the SAME width (dm/frozen).
+        // noTail = CODEC-ONLY: freeze the WHOLE embedding (frozen = dm, zero learned tail). Tests whether atomic facts need
+        // the learned embedding tail or live in the relation-banks — if capacity barely drops vs the tailed run, facts are in the banks.
         try { Console.OutputEncoding = System.Text.Encoding.UTF8; } catch { }
 
         // ---- fixed vocab (built up-front so tokens/seeds are stable across every N) ----
@@ -52,7 +54,7 @@ public static class CapacityBench
         var valSym = new int[ValueSet]; for (var i = 0; i < ValueSet; i++) valSym[i] = Id($"v{i}");
         var vocab = id.Count + 8;   // no 1024 floor: the pad rows never train and just bloat the embedding (88% of params) and the per-token softmax cost — dead weight, not capacity
         var dm = Math.Min(dModel, PhasorCodec.Dim);         // model width. A SMALLER PrismFormer of the SAME TYPE: dm>=64 keeps the full frozen codec identity + a learned tail (still a real PrismFormer, just a smaller container). Only dm<64 would drop into codec-less orbital-only.
-        var frozen = Math.Min(PhasorCodec.FrozenReals, dm);
+        var frozen = noTail ? dm : Math.Min(PhasorCodec.FrozenReals, dm);   // noTail → freeze the whole embedding (no learned tail)
         double[] Seed(int w)
         {
             var full = w < words.Count ? PhasorCodec.Encode(words[w]) : new double[PhasorCodec.Dim];
@@ -144,7 +146,7 @@ public static class CapacityBench
 
         // ONE job per (N, model-kind); ALL run concurrently to fill the cores (was 2-way Parallel.Invoke, sequential N).
         var jobs = new List<(int N, int kind)>();               // kind 0 = PrismFormer, 1 = transformer
-        foreach (var N in Ns) { jobs.Add((N, 0)); jobs.Add((N, 1)); }
+        foreach (var N in Ns) { jobs.Add((N, 0)); if (!skipTransformer) jobs.Add((N, 1)); }
         jobs = jobs.OrderByDescending(j => j.N).ToList();        // longest-processing-time-first: start the big-N jobs first so they aren't end-of-run stragglers (minimises makespan)
         var res = new System.Collections.Concurrent.ConcurrentDictionary<(int, int), (double r, int ep, bool conv)>();
         Console.WriteLine($"training {jobs.Count} jobs concurrently ({Ns.Count} N × 2 models), early-stop at convergence/plateau (cap {passes} passes)…\n");
@@ -169,16 +171,18 @@ public static class CapacityBench
         string Fmt((double r, int ep, bool conv) t) => $"{t.r,7:P1} {(t.conv ? "conv" : "plat"),-4} @{t.ep,3}ep";
         foreach (var N in Ns)
         {
-            var p = res[(N, 0)]; var x = res[(N, 1)];
-            curveP.Add((N, p.r)); curveX.Add((N, x.r));
+            var p = res[(N, 0)]; curveP.Add((N, p.r));
+            if (skipTransformer) { Console.WriteLine($"  {N,8}  {Fmt(p),22}"); continue; }
+            var x = res[(N, 1)]; curveX.Add((N, x.r));
             Console.WriteLine($"  {N,8}  {Fmt(p),22}  {Fmt(x),22}");
         }
 
         int Capacity(List<(int N, double r)> c, double thr) { var cap = 0; foreach (var (N, r) in c) if (r >= thr) cap = N; return cap; }
         Console.WriteLine("\natomic capacity (largest N still memorised) ------------------------------------");
-        Console.WriteLine($"  ≥95% recall :  PrismFormer {Capacity(curveP, 0.95),6:N0}     transformer {Capacity(curveX, 0.95),6:N0}");
-        Console.WriteLine($"  ≥50% recall :  PrismFormer {Capacity(curveP, 0.50),6:N0}     transformer {Capacity(curveX, 0.50),6:N0}");
-        if (curveP[^1].r >= 0.95 || curveX[^1].r >= 0.95) Console.WriteLine($"  NOTE: a model is still ≥95% at N={Ns[^1]} (the top) — its ceiling is HIGHER; re-run with --maxN above {maxN}.");
+        var tag = noTail ? "PrismFormer (NO TAIL)" : "PrismFormer          ";
+        Console.WriteLine($"  ≥95% recall :  {tag} {Capacity(curveP, 0.95),6:N0}" + (skipTransformer ? "" : $"     transformer {Capacity(curveX, 0.95),6:N0}"));
+        Console.WriteLine($"  ≥50% recall :  {tag} {Capacity(curveP, 0.50),6:N0}" + (skipTransformer ? "" : $"     transformer {Capacity(curveX, 0.50),6:N0}"));
+        if (curveP[^1].r >= 0.95 || (!skipTransformer && curveX[^1].r >= 0.95)) Console.WriteLine($"  NOTE: still ≥95% at N={Ns[^1]} (the top) — ceiling is HIGHER; re-run with --maxN above {maxN}.");
         Console.WriteLine("\nmemorisation, not held-out: every fact is arbitrary (no structure), so recall = raw associative-memory capacity.");
     }
 }
