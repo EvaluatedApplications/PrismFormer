@@ -175,14 +175,23 @@ public sealed class StudioModel
         catch (Exception e) { log("[train] GPU init failed → CPU: " + e.Message.Split('\n')[0]); gpu = null; }
         // FULL speed: no priority gimping (that was the ~60% CPU). EvalApp is data-parallel and schedules any overflow.
         // WARMUP: the first batch is TINY so feedback lands in seconds, then it doubles up to fill every core.
-        // Depth-scaled LR. Bumped 4.0 -> 8.0 (doubles it: ~1.9e-4 -> ~3.75e-4 at L32, a standard Adam rate).
-        // Safe: ReZero handles deep stability, and mesh consensus lives in the merge rate, not this rate.
-        var lr = 1.5e-3 * Math.Min(1.0, 8.0 / PrismSpec.Layers);
+        // LR SCHEDULE — bench --lrsweep on THIS exact L32 shape found the sweet spot at ~1.5e-3 (≈8x the old 1.9e-4): fastest
+        // stable descent (3e-3 is the ceiling, 6e-3 descends then explodes, ≥1.2e-2 is dead). The old flat rate CRAWLED — 50
+        // steps at 1.9e-4 hadn't even burned off the identity-init's ~126-nat overconfidence. So WARM UP into the peak (cold
+        // Adam + a 32-deep stack shouldn't take a hot first step), hold it while loss is high (bootstrap), then DECAY toward the
+        // low ~2e-4 lifelong rate as the model gets competent — the low rate is for the mesh/consensus phase (stability,
+        // anti-poison via the MERGE rate + ReZero for depth), NOT the from-scratch climb where it just wastes time.
+        var peakLr = 1.5e-3 * Math.Min(1.0, 32.0 / PrismSpec.Layers);   // L≤32 → 1.5e-3; deeper than 32 keeps a mild guard
+        const double floorLr = 2e-4, hiLoss = 8.0, loLoss = 3.0, warmupExamples = 4000;
+        var lr = peakLr;
         var rng = new Random();
         var maxBatch = gpu != null ? 512 : Math.Max(64, Environment.ProcessorCount);   // GPU wants big batches (amortises the per-batch param-sync); CPU stays at ~cores
         var warm = 4;
         var epochSecs = Math.Max(5.0, minutesPerEpoch * 60.0);   // an "epoch" = ~minutesPerEpoch of random draws — the corpus is far too big for a full pass
         var sw = Stopwatch.StartNew(); long stepTotal = 0; double lastSnap = 0, lastSample = 0, loss = 0; var first = true; var sampleTick = 0; var genBusy = false;
+        var emaLoss = hiLoss;   // smoothed recent loss driving the decay; starts hot so bootstrap begins at peak
+        // warm ramp (never 0 → first batch still trains) × loss-driven peak↔floor: high loss = peak (bootstrap), low = floor (lifelong).
+        double Lr() { var wf = Math.Max(0.05, Math.Min(1.0, stepTotal / warmupExamples)); var t = Math.Clamp((emaLoss - loLoss) / (hiLoss - loLoss), 0, 1); return peakLr * wf * (floorLr / peakLr + (1 - floorLr / peakLr) * t); }
         if (corpus.Count > 0) try { var (e0, t0) = corpus.GetExample(rng.NextInt64(corpus.Count)); log($"…{Clean(Tail(_v.Decode(e0)))} ▸ \"{_v.Symbol(_snapshot.Predict(e0))}\"  (real \"{_v.Symbol(t0)}\")"); } catch { }   // instant: untrained guess (Symbol → char or subword)
         for (var ep = 0; ep < epochs && !ct.IsCancellationRequested; ep++)
         {
@@ -216,6 +225,7 @@ public sealed class StudioModel
                 for (var i = 0; i < bsz; i++) { var s = srcs[PickSrc()].S; batch.Add(s.GetExample(rng.NextInt64(s.Count))); }   // VOLUME-WEIGHTED: folder ∝ Count^MixAlpha (see the [mix] log), then an example
                 if (!CorpusOnly) { var drained = 0; while (drained < 32 && _inbox.TryDequeue(out var ex2)) { batch.Add(ex2); drained++; } }   // network-fed learning (muted in corpus-only)
                 if (batch.Count == 0) break;
+                lr = Lr();   // per-batch: warmup ramp × loss-driven peak(1.5e-3)↔floor(2e-4) decay
                 var bt0 = sw.Elapsed.TotalSeconds;
                 lock (_write)
                 {
@@ -229,11 +239,12 @@ public sealed class StudioModel
                     _real = true;   // trained → weights are real
                 }
                 stepTotal += batch.Count;
+                if (loss > 0) emaLoss += 0.03 * (loss - emaLoss);   // slow EMA → the decay tracks real competence, not batch noise
                 var secs = sw.Elapsed.TotalSeconds;
                 var wps = batch.Count / Math.Max(0.01, secs - bt0);
                 if (first) { first = false; log("live — what the model generates on your data:"); }
                 if (secs - lastSnap >= 3.0) { var snap = Clone(_model); _snapshot = snap; lastSnap = secs; }   // refresh serving snapshot
-                report($"epoch {ep + 1}/{epochs} · {secs - epStart:F0}/{epochSecs:F0}s · loss {loss:F3} · {wps:F1} win/s{(Hosting ? $" · {ActiveWorkers} peer(s)" : "")}");   // metrics → status bar
+                report($"epoch {ep + 1}/{epochs} · {secs - epStart:F0}/{epochSecs:F0}s · loss {loss:F3} · lr {lr:0.0e0} · {wps:F1} win/s{(Hosting ? $" · {ActiveWorkers} peer(s)" : "")}");   // metrics → status bar
                 if (secs - lastSample >= 1.2 && !genBusy)   // CYCLE folders; GENERATE the whole answer (stops at the STOP token) in the BACKGROUND so it never blocks training/Stop
                 {
                     lastSample = secs;

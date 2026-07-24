@@ -68,6 +68,7 @@ if (args.Contains("--bind")) { BindBench.Run(); return; }   // does the REAL FRO
 if (args.Contains("--mathdomain")) { MathDomainBench.Run(); return; }   // how maths behaves in the phasor codec: exact +,-,x,/, dual-band, modular wrap, and the synthesis boundary (superposition = mean)
 if (args.Contains("--shift")) { ShiftBench.Run(passes: stepsArg ?? 70); return; }   // does bank rank S actually buy capacity? sweep S on a recall task — is grow-S justified?
 if (args.Contains("--mixedspec")) { MixedSpecBench.Run(passes: stepsArg ?? 100); return; }   // can a deep and a shallow pet (same codec) average on the overlap without breaking? mixed-spec sharing
+if (args.Contains("--lrsweep")) { LrSweepBench.Run(epochs: stepsArg ?? 5); return; }   // what LR actually works for the real L32/d256/S64 shape on corpus next-token? sweep current->ridiculous (3.0), map where it breaks
 if (args.Contains("--growlayer")) { UpgradeBench.RunGrowLayer(); return; }   // EXPERIMENT: non-destructive layer add (zero-output-projection = identity + live gradient) vs the naive all-zero (dead) control
 if (args.Contains("--spec")) { UpgradeBench.RunSpec(); return; }   // verify a c256 checkpoint LoadUpgrades into the current spec byte-clean (safe to ship the bump)
 if (args.Contains("--upgrade-lm")) { UpgradeBench.RunLm(); return; }   // BENEFIT: train each upgrade config on char LM next-token, held-out accuracy
