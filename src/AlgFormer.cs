@@ -76,6 +76,26 @@ public sealed class AlgFormer
     /// weight so a slice always lands on a TRAINABLE parameter instead of an already-identical, deterministic frozen face.</summary>
     public long FrozenDoublePrefix => _frozen >= _d ? (long)_v * _d : 0;
 
+    /// <summary>MIXED-SPEC weight averaging: elastic-average the OVERLAPPING parameters with another model <paramref name="o"/>
+    /// that shares this model's codec (same vocab + dim) but may differ in depth, shifts, or context. Only the aligned
+    /// low-index components are touched — the first min(layers) layers, the first min(shifts) shift terms of each bank, the
+    /// first min(context) positions — because under a shared codec and shared lineage those indices mean the same thing on
+    /// both models (shift-by-k is shift-by-k; position k is position k; and a grown pet's first N layers ARE the shallower
+    /// pet's layers). The deeper/wider/longer model's extra components have no counterpart and are left untouched. The
+    /// embedding is the frozen codec (identical on both) and is skipped. Lets pets grown to different sizes still share and
+    /// breed without a hard-fork gate. <paramref name="alpha"/> is the merge rate (this += alpha·(o − this) on the overlap).</summary>
+    public void PartialAverage(AlgFormer o, double alpha)
+    {
+        void Mix(double[] a, double[] b) { var n = Math.Min(a.Length, b.Length); for (var i = 0; i < n; i++) a[i] += alpha * (b[i] - a[i]); }
+        for (var t = 0; t < Math.Min(_maxT, o._maxT); t++) Mix(Pos[t], o.Pos[t]);   // shared positions
+        Mix(C, o.C);                                                                 // vocab bias (same vocab under a shared codec)
+        var mL = Math.Min(_layers, o._layers);
+        var mS = Math.Min(_s, o._s);
+        for (var l = 0; l < mL; l++)
+            foreach (var (a, b) in new[] { (Ls[l].Rq, o.Ls[l].Rq), (Ls[l].Rk, o.Ls[l].Rk), (Ls[l].Rv, o.Ls[l].Rv), (Ls[l].Ro, o.Ls[l].Ro), (Ls[l].A1, o.Ls[l].A1), (Ls[l].Ag, o.Ls[l].Ag), (Ls[l].Ao, o.Ls[l].Ao) })
+                for (var k = 0; k < mS; k++) Mix(a[k], b[k]);   // shared shift terms of the shared layers
+    }
+
     // ---- gradient buffer (detached, mergeable) ----
     public sealed class Grads
     {
