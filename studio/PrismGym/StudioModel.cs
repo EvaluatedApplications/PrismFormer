@@ -175,7 +175,9 @@ public sealed class StudioModel
         catch (Exception e) { log("[train] GPU init failed → CPU: " + e.Message.Split('\n')[0]); gpu = null; }
         // FULL speed: no priority gimping (that was the ~60% CPU). EvalApp is data-parallel and schedules any overflow.
         // WARMUP: the first batch is TINY so feedback lands in seconds, then it doubles up to fill every core.
-        var lr = 1.5e-3 * Math.Min(1.0, 4.0 / PrismSpec.Layers);
+        // Depth-scaled LR. Bumped 4.0 -> 8.0 (doubles it: ~1.9e-4 -> ~3.75e-4 at L32, a standard Adam rate).
+        // Safe: ReZero handles deep stability, and mesh consensus lives in the merge rate, not this rate.
+        var lr = 1.5e-3 * Math.Min(1.0, 8.0 / PrismSpec.Layers);
         var rng = new Random();
         var maxBatch = gpu != null ? 512 : Math.Max(64, Environment.ProcessorCount);   // GPU wants big batches (amortises the per-batch param-sync); CPU stays at ~cores
         var warm = 4;
