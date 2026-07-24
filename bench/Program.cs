@@ -64,6 +64,9 @@ if (args.Contains("--profile")) { UpgradeBench.RunProfile(); return; }   // trai
 if (args.Contains("--reason")) { ReasonBench.Run(passes: stepsArg ?? 120); return; }   // multi-step reasoning (word+number variable chains) generalisation to UNSEEN, swept over depth/width/context/chain-length
 if (args.Contains("--quantise")) { QuantiseBench.Run(passes: stepsArg ?? 200); return; }   // does the learned control quantise into crisp gate/attention regions on a crisp substrate vs a mushy one?
 if (args.Contains("--crosstalk")) { CrosstalkBench.Run(); return; }   // EMPIRICAL HRR capacity: how many bound pairs a dim-d face holds before decode breaks (sweeps dim x vocab) - does tiny dim suffice?
+if (args.Contains("--bind")) { BindBench.Run(); return; }   // does the REAL FROZEN codec short-cut to a NEVER-bound token as depth grows? recall/other-bound/phantom split
+if (args.Contains("--mathdomain")) { MathDomainBench.Run(); return; }   // how maths behaves in the phasor codec: exact +,-,x,/, dual-band, modular wrap, and the synthesis boundary (superposition = mean)
+if (args.Contains("--shift")) { ShiftBench.Run(passes: stepsArg ?? 70); return; }   // does bank rank S actually buy capacity? sweep S on a recall task — is grow-S justified?
 if (args.Contains("--growlayer")) { UpgradeBench.RunGrowLayer(); return; }   // EXPERIMENT: non-destructive layer add (zero-output-projection = identity + live gradient) vs the naive all-zero (dead) control
 if (args.Contains("--spec")) { UpgradeBench.RunSpec(); return; }   // verify a c256 checkpoint LoadUpgrades into the current spec byte-clean (safe to ship the bump)
 if (args.Contains("--upgrade-lm")) { UpgradeBench.RunLm(); return; }   // BENEFIT: train each upgrade config on char LM next-token, held-out accuracy

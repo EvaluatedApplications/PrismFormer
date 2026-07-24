@@ -14,6 +14,9 @@ using PrismFormer.Gpu;
 
 var mode = args.Length > 0 ? args[0] : "poc";
 
+// prec: can this card go faster with fp16? Times the relation-bank op at fp32 vs fp16 (see GpuComputeBench).
+if (mode == "prec") { GpuComputeBench.Run(); GpuDevice.Shutdown(); return; }
+
 if (mode == "poc")
 {
     Console.WriteLine("PrismFormerGpu PoC — ILGPU/CUDA toolchain check\n");
